@@ -2,7 +2,9 @@
 
 [中文](README.md) · [English](README.en.md)
 
-Minecraft survival rules × real coding work: an entertainment-focused agent preset where the rules **genuinely work and genuinely bite**. Every game concept aligns with vanilla Minecraft survival, and every plugin mechanism follows the official preset spec (same architecture as the dsh-collaboration suite).
+> You code, search, and ship in DeepSeek Harness as usual — while **living inside a Minecraft survival world**: every file write drains 1 hunger, working late at night spawns mobs, and without an iron pickaxe even `subagent` refuses to run. Eat when hungry, defend at night, and if you die your backpack drops and your XP halves — a new session respawns you at your bed.
+
+Every rule is **hard-settled by the engine** (not prompt theater), every game concept maps to vanilla Minecraft survival, and every plugin mechanism follows the official preset spec (same architecture as the dsh-collaboration suite).
 
 **Suite version 0.1.0**: engine 0.13.0 · tool-survival 0.6.0 · hud 0.1.3 · [Installation guide](docs/installation.md) · [GitHub Releases](https://github.com/Socialist-Sister/dsh-survival/releases)
 

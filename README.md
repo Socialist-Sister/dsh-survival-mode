@@ -2,7 +2,9 @@
 
 [中文](README.md) · [English](README.en.md)
 
-Minecraft 生存规则 × 真实编码工作：一个**真的能干活、规则真的生效**的娱乐性 Agent 预设。所有游戏概念对齐原版 Minecraft 生存模式，所有插件机制遵循官方插件规范（与 dsh-collaboration 套件同构）。
+> 你在 DeepSeek Harness 里照常写代码、查资料、做交付——同时**活在一个 Minecraft 生存世界**里：每写一个文件掉 1 饥饿，深夜干活会刷怪，没有铁镐连 `subagent` 都调用不了。饿了得吃，夜了得防，死了背包全掉、经验减半，新会话从重生点复活。
+
+所有规则由引擎**硬结算**（不是人设演戏），所有游戏概念对齐原版 Minecraft 生存模式，所有插件机制遵循官方插件规范（与 dsh-collaboration 套件同构）。
 
 **套件版本 0.1.0**：engine 0.13.0 · tool-survival 0.6.0 · hud 0.1.3 · [安装指南](docs/installation.md) · [GitHub Releases](https://github.com/Socialist-Sister/dsh-survival/releases)
 
