@@ -1,6 +1,6 @@
-<div align="center">
+﻿<div align="center">
 
-# dsh-survival
+# dsh-survival mode
 
 **Survival Mode for DeepSeek Harness**
 
@@ -9,8 +9,8 @@ Minecraft survival rules × real coding work — an entertainment-focused agent 
 [中文](README.md) · [English](README.en.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/Socialist-Sister/dsh-survival)](https://github.com/Socialist-Sister/dsh-survival/releases)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/Socialist-Sister/dsh-survival#known-limitations--contributing)
+[![Release](https://img.shields.io/github/v/release/Socialist-Sister/dsh-survival-mode)](https://github.com/Socialist-Sister/dsh-survival-mode/releases)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/Socialist-Sister/dsh-survival-mode#known-limitations--contributing)
 
 <kbd>engine</kbd> <kbd>tool-survival</kbd> <kbd>hud</kbd> <kbd>agent-preset</kbd>
 
@@ -22,7 +22,7 @@ Minecraft survival rules × real coding work — an entertainment-focused agent 
 
 Every rule is **hard-settled by the engine** (not prompt theater), every game concept maps to vanilla Minecraft survival, and every plugin mechanism follows the official preset spec (same architecture as the dsh-collaboration suite).
 
-**Suite version 0.1.0**: engine 0.13.0 · tool-survival 0.6.0 · hud 0.1.3 · [Installation guide](docs/installation.md) · [GitHub Releases](https://github.com/Socialist-Sister/dsh-survival/releases)
+**Suite version 0.1.0**: engine 0.13.0 · tool-survival 0.6.0 · hud 0.1.3 · [Installation guide](docs/installation.md) · [GitHub Releases](https://github.com/Socialist-Sister/dsh-survival-mode/releases)
 
 **Highlights**
 
