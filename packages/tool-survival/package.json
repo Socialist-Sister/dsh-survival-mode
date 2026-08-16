@@ -1,0 +1,36 @@
+{
+  "name": "@dsh-survival/tool-survival",
+  "version": "0.6.0",
+  "description": "Survival-mode tool package: survival_status / survival_craft / survival_eat / survival_sleep plus the HUD prompt section",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["lib", "README.md"],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --out-dir lib",
+    "typecheck": "tsc --noEmit",
+    "pack": "pnpm pack --pack-destination ../../dist"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
+    "@dsh-survival/engine": "workspace:*",
+    "tsup": "^8.3.5",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

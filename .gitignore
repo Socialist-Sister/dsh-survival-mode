@@ -1,0 +1,8 @@
+node_modules/
+dist/
+lib/
+*.tgz
+.DS_Store
+
+# 本地测试产物（生存模式会话写进工作区的测试笔记，不随仓库发布）
+dev-sandbox/
