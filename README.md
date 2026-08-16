@@ -1,10 +1,19 @@
 # dsh-survival —— DeepSeek Harness 生存模式
 
+[中文](README.md) · [English](README.en.md)
+
 Minecraft 生存规则 × 真实编码工作：一个**真的能干活、规则真的生效**的娱乐性 Agent 预设。所有游戏概念对齐原版 Minecraft 生存模式，所有插件机制遵循官方插件规范（与 dsh-collaboration 套件同构）。
 
-**套件版本 0.1.0**：engine 0.13.0 · tool-survival 0.6.0 · hud 0.1.3。
+**套件版本 0.1.0**：engine 0.13.0 · tool-survival 0.6.0 · hud 0.1.3 · [安装指南](docs/installation.md) · [GitHub Releases](https://github.com/Socialist-Sister/dsh-survival/releases)
 
-本文件是完整使用说明书：世界规则、生存工具、合成配方、物品用法、难度档、设定项、存档机制、状态栏与常见问题。
+**核心特性**
+
+- 🎮 **原版概念硬结算**：生命 20（10 心）、饥饿 20、昼夜、夜晚刷怪——全部由引擎在 `tools/pre-execute` 实时结算，不是人设演戏
+- 🧑‍🚀 **用户是玩家**：agent 是化身与执行者——播报状态、听令行事，可一句话授权托管
+- ⛏️ **工作即挖矿**：写文件、完成目标、退出计划都会掉落原版矿石与经验
+- 🔒 **真实工具门禁**：没有铁镐就用不了 subagent，没有望远镜就上不了网——像没有镐子挖不了钻石
+- 💾 **世界存档跨会话**：天数、经验、成就、墓碑持久化；死亡掉落、新会话重生
+- 🖥️ **浏览器状态栏**：心+鸡腿+昼夜+经验，只在生存模式会话显示（OpenMoji 图标，无版权风险）
 
 ---
 
