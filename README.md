@@ -1,6 +1,22 @@
-# dsh-survival —— DeepSeek Harness 生存模式
+<div align="center">
+
+# dsh-survival
+
+**DeepSeek Harness 生存模式**
+
+Minecraft 生存规则 × 真实编码工作——规则硬结算、死亡真实发生的娱乐性 Agent 预设。
 
 [中文](README.md) · [English](README.en.md)
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/Socialist-Sister/dsh-survival)](https://github.com/Socialist-Sister/dsh-survival/releases)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/Socialist-Sister/dsh-survival#已知不足与参与贡献)
+
+<kbd>engine</kbd> <kbd>tool-survival</kbd> <kbd>hud</kbd> <kbd>agent-preset</kbd>
+
+</div>
+
+---
 
 > 你在 DeepSeek Harness 里照常写代码、查资料、做交付——同时**活在一个 Minecraft 生存世界**里：每写一个文件掉 1 饥饿，深夜干活会刷怪，没有铁镐连 `subagent` 都调用不了。饿了得吃，夜了得防，死了背包全掉、经验减半，新会话从重生点复活。
 

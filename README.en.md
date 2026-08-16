@@ -1,6 +1,22 @@
-# dsh-survival — Survival Mode for DeepSeek Harness
+<div align="center">
+
+# dsh-survival
+
+**Survival Mode for DeepSeek Harness**
+
+Minecraft survival rules × real coding work — an entertainment-focused agent preset with hard-settled rules and real death.
 
 [中文](README.md) · [English](README.en.md)
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/Socialist-Sister/dsh-survival)](https://github.com/Socialist-Sister/dsh-survival/releases)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/Socialist-Sister/dsh-survival#known-limitations--contributing)
+
+<kbd>engine</kbd> <kbd>tool-survival</kbd> <kbd>hud</kbd> <kbd>agent-preset</kbd>
+
+</div>
+
+---
 
 > You code, search, and ship in DeepSeek Harness as usual — while **living inside a Minecraft survival world**: every file write drains 1 hunger, working late at night spawns mobs, and without an iron pickaxe even `subagent` refuses to run. Eat when hungry, defend at night, and if you die your backpack drops and your XP halves — a new session respawns you at your bed.
 
