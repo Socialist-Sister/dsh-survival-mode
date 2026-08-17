@@ -149,6 +149,8 @@ ln -sfn <repo>/packages/hud            ~/.dsh/profiles/node_modules/@dsh-surviva
 cd ~/.dsh/profiles/web && node -e "console.log(require.resolve('@dsh-survival/engine/package.json'))"
 ```
 
+> **重要：开发模式不要同时用 `pnpm add` 安装同一批包**——`pnpm add` 会把 tgz 快照提升到 profile 根 `node_modules`，Node 目录上溯时**优先命中快照、遮蔽符号链接**，改代码 build 后 DSH 仍解析到旧快照。二选一：要么符号链接（本方式），要么 `pnpm add`（方式 A）。
+
 开发循环：改 `packages/*/src` → `pnpm run build` → 重启 DSH → 生效（宿主行变更需重启；预设文件变更每次调用重读）。平台差异：预设里 `tool-bash`/`tool-pwsh` 按 `process.platform` 自动取舍，WSL/Linux/macOS 用 bash，Windows 用 pwsh，无需手动改。
 
 > **Windows 开发机**同样可以 `mklink /D` 或 `junction` 建符号链接指向仓库包目录，机制一致。
