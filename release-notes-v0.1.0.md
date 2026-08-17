@@ -1,4 +1,4 @@
-﻿## 生存模式 v0.1.0
+## 生存模式 v0.1.0
 
 Minecraft 生存规则 × 真实编码工作的娱乐性 Agent 预设（engine 0.13.0 · tool-survival 0.6.0 · hud 0.1.3）。
 

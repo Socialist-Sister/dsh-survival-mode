@@ -1,4 +1,4 @@
-﻿<div align="center">
+<div align="center">
 
 # dsh-survival mode
 
@@ -403,14 +403,14 @@ Status-bar icons are from [OpenMoji](https://openmoji.org) (**CC BY-SA 4.0**, at
 
 ## Development
 
-```powershell
+```bash
 pnpm install
 pnpm run build       # tsup builds lib/ (hud includes the client bundle)
 pnpm run typecheck   # build first, then typecheck (tool-survival needs engine's d.ts)
 pnpm run pack        # packs tarballs into dist/
 ```
 
-Installing into DeepSeek Harness: see [docs/installation.md](docs/installation.md).
+Works on Windows / Linux / WSL / macOS (all scripts are cross-platform). Installing into DeepSeek Harness: see [docs/installation.md](docs/installation.md) — it covers all three platforms and the dev-mode symlink workflow (point the packages at your checkout, rebuild, restart DSH).
 
 ---
 

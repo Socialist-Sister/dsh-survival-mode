@@ -1,4 +1,4 @@
-﻿<div align="center">
+<div align="center">
 
 # dsh-survival mode
 
@@ -296,7 +296,7 @@ Minecraft 生存规则 × 真实编码工作——规则硬结算、死亡真实
 
 ## 设定（settings.yaml）
 
-`${DSH_HOME}\settings.yaml` 的 `dsh-survival` 段（不写则全部用默认值）：
+`${DSH_HOME}/settings.yaml` 的 `dsh-survival` 段（Windows 下 `${DSH_HOME}` 为 `%USERPROFILE%\.dsh`，Linux/WSL/macOS 下为 `~/.dsh`；不写则全部用默认值）：
 
 ```yaml
 dsh-survival:
@@ -401,14 +401,14 @@ dsh-survival:
 
 ## 开发
 
-```powershell
+```bash
 pnpm install
 pnpm run build       # tsup 构建 lib/（hud 含 client 包）
 pnpm run typecheck   # 先 build 再 typecheck（工具包依赖引擎的 d.ts）
 pnpm run pack        # 打包 tgz 到 dist/
 ```
 
-安装到 DeepSeek Harness 见 [docs/installation.md](docs/installation.md)。
+支持 Windows / Linux / WSL / macOS（脚本均为跨平台写法）。安装到 DeepSeek Harness 见 [docs/installation.md](docs/installation.md)——含三端命令对照与开发模式（符号链接直指仓库，改代码 build 后重启即生效）。
 
 ---
 
