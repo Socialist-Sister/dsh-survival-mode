@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { snapshotWorkspace, restoreWorkspace, removeSnapshot, DEFAULT_EXCLUDES } from '../src/respawn.ts'
+import { snapshotWorkspace, restoreWorkspace, removeSnapshot, saveConversation, DEFAULT_EXCLUDES } from '../src/respawn.ts'
 
 /** 建一个临时"工作区 + 备份目录"。 */
 async function makeDirs() {
@@ -164,6 +164,25 @@ test('防护：备份目录位于工作区内时拒绝快照与回退', async ()
     assert.equal(await readFile(join(cwd, 'a.txt'), 'utf8'), 'v1', '工作区未被破坏')
   } finally {
     await rm(join(cwd, '..'), { recursive: true, force: true })
+  }
+})
+
+test('saveConversation：对话摘要写入快照目录，回退不影响它', async () => {
+  const { cwd, backup } = await makeDirs()
+  try {
+    await writeFile(join(cwd, 'a.txt'), 'v1')
+    await snapshotWorkspace(cwd, backup, DEFAULT_EXCLUDES)
+    const ok = await saveConversation(backup, '# 重生点对话摘要\n\n👤 你好\n')
+    assert.equal(ok, true)
+    const saved = await readFile(join(backup, 'conversation.md'), 'utf8')
+    assert.match(saved, /重生点对话摘要/)
+    // 回退后 conversation.md 仍在（不属于工作区，不参与回退）
+    await restoreWorkspace(cwd, backup, DEFAULT_EXCLUDES)
+    assert.equal((await readFile(join(backup, 'conversation.md'), 'utf8')).includes('👤 你好'), true)
+    // 工作区里没有 conversation.md（它只存在于快照目录）
+    await assert.rejects(readFile(join(cwd, 'conversation.md')))
+  } finally {
+    await rm(join(backup, '..'), { recursive: true, force: true })
   }
 })
 

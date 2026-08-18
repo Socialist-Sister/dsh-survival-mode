@@ -26,7 +26,7 @@ export type Difficulty = 'peaceful' | 'easy' | 'normal' | 'hard' | 'hardcore'
 
 export interface SurvivalConfig {
   difficulty: Difficulty
-  /** 一天包含的对话回合数（用户消息计数），默认 8，最后 1/3 为夜晚。 */
+  /** 一天包含的对话回合数（用户消息计数），默认 8，白天与夜晚各半。 */
   dayLengthTurns: number
   /** 夜晚每个动作（对话回合或工具调用）刷怪的基础概率。 */
   mobChance: number
@@ -286,13 +286,20 @@ export interface World {
   minedMediumDay: number
 }
 
+/** 跃迁播报：urgent 的消息插队（steer）立即送达，普通消息排队（followup）。 */
+export interface Notice {
+  text: string
+  /** true = 重要状态（入夜/低饥饿/低血量/备份完成），投递给 agent 时插队。 */
+  urgent: boolean
+}
+
 export interface SettleOutcome {
   /** 需要打断本次工具调用的原因（骷髅射箭 / 死亡）。 */
   deny?: string
   /** 本次结算导致的死因（由调用方负责持久化）。 */
   cause?: string
   /** 状态跃迁播报（由调用方投递给玩家）。 */
-  notices?: string[]
+  notices?: Notice[]
 }
 
 /** 对话回合结算结果（用户消息触发）。 */
@@ -302,7 +309,7 @@ export interface TurnOutcome {
   /** 是否跨过了一天（调用方负责持久化天数）。 */
   dayChanged?: boolean
   /** 状态跃迁播报（由调用方投递给玩家）。 */
-  notices?: string[]
+  notices?: Notice[]
 }
 
 // ── 工具函数 ────────────────────────────────────────────────────────────────
@@ -376,8 +383,9 @@ function pickWeighted<T extends { weight: number }>(items: readonly T[]): T {
 
 // ── 昼夜与难度 ──────────────────────────────────────────────────────────────
 
+/** 夜晚长度：与白天各半（原版昼夜等长，一天 = 白天 + 夜晚）。 */
 export function nightLength(cfg: SurvivalConfig): number {
-  return Math.max(1, Math.floor(cfg.dayLengthTurns / 3))
+  return Math.max(1, Math.floor(cfg.dayLengthTurns / 2))
 }
 
 export function isNight(world: World, cfg: SurvivalConfig): boolean {
@@ -423,7 +431,8 @@ export function settle(world: World, cfg: SurvivalConfig, toolName: string): Set
     }
   }
 
-  // 昼夜由对话回合推进（见 onTurn）；工具调用只结算饥饿与怪物遭遇
+  // 昼夜由对话回合推进（见 onTurn）；工具调用只结算饥饿与怪物遭遇。
+  // 入夜第一回合的宽限只发生在 onTurn（见下），这里每个夜晚动作都判定。
   if (isNight(world, cfg)) {
     const mob = rollMob(world, cfg)
     if (mob?.cause !== undefined) {
@@ -446,28 +455,30 @@ const HUNGER_WARN_AT = 4
 const HP_WARN_AT = 4
 const WARN_RESET_AT = 10
 
-function collectTransitions(world: World, cfg: SurvivalConfig): string[] {
+function collectTransitions(world: World, cfg: SurvivalConfig): Notice[] {
   if (world.dead) return []
-  const notices: string[] = []
+  const notices: Notice[] = []
 
   // 入夜播报 / 黎明战报（天亮时统计昨夜遭遇并清零）
   if (isNight(world, cfg)) {
     if (!world.nightNotified) {
       world.nightNotified = true
       const torch = (world.items.torch ?? 0) > 0
-      notices.push(
-        `🌙 第 ${world.day} 天夜幕降临——夜晚会刷怪。${torch ? '你带着火把，火光压制了部分怪物（刷怪概率 ×0.8）。' : '没有火把的话合成一个（煤+木棍）压制刷怪；或做床睡觉跳过夜晚（羊毛×3+木板×3）。'}`,
-      )
+      notices.push({
+        text: `🌙 第 ${world.day} 天夜幕降临——夜晚会刷怪。${torch ? '你带着火把，火光压制了部分怪物（刷怪概率 ×0.8）。' : '没有火把的话合成一个（煤+木棍）压制刷怪；或做床睡觉跳过夜晚（羊毛×3+木板×3）。'}入夜第一回合不刷怪：现在回复"睡觉"可以跳过夜晚，之后每个回合都会遭遇判定。`,
+        urgent: true,
+      })
     }
   } else if (world.nightNotified) {
-    // 黎明：昨夜战报（让剑盾的耐久消耗有账可查）
+    // 黎明：昨夜战报（让剑盾的耐久消耗有账可查）——普通消息，排队送达
     world.nightNotified = false
     if (world.nightEncounters > 0) {
-      notices.push(
-        `☀️ 昨夜战报：遭遇 ${world.nightEncounters} 次袭击——⚔️击退 ${world.nightRepelled}，🛡️格挡 ${world.nightBlocked}，💔受伤 ${world.nightHurt} 次（共 −${world.nightDamage}❤️）。剑盾在战斗中消耗了耐久（击退/格挡/落空都会磨损）。`,
-      )
+      notices.push({
+        text: `☀️ 昨夜战报：遭遇 ${world.nightEncounters} 次袭击——⚔️击退 ${world.nightRepelled}，🛡️格挡 ${world.nightBlocked}，💔受伤 ${world.nightHurt} 次（共 −${world.nightDamage}❤️）。剑盾在战斗中消耗了耐久（击退/格挡/落空都会磨损）。`,
+        urgent: false,
+      })
     } else {
-      notices.push('☀️ 昨夜平安无事，一夜好眠。')
+      notices.push({ text: '☀️ 昨夜平安无事，一夜好眠。', urgent: false })
     }
     world.nightEncounters = 0
     world.nightRepelled = 0
@@ -480,7 +491,10 @@ function collectTransitions(world: World, cfg: SurvivalConfig): string[] {
   if (world.hunger <= HUNGER_WARN_AT) {
     if (!world.warnedHunger) {
       world.warnedHunger = true
-      notices.push(`🍖 饥饿只剩 ${world.hunger}/20——再不吃东西就要掉血了。面包回复 ${cfg.breadHunger} 饥饿（survival_craft bread 然后 survival_eat）。`)
+      notices.push({
+        text: `🍖 饥饿只剩 ${world.hunger}/20——再不吃东西就要掉血了。面包回复 ${cfg.breadHunger} 饥饿（survival_craft bread 然后 survival_eat）。`,
+        urgent: true,
+      })
     }
   } else if (world.hunger >= WARN_RESET_AT) {
     world.warnedHunger = false
@@ -490,7 +504,10 @@ function collectTransitions(world: World, cfg: SurvivalConfig): string[] {
   if (world.hp <= HP_WARN_AT) {
     if (!world.warnedHp) {
       world.warnedHp = true
-      notices.push(`❤️ 生命只剩 ${world.hp}/20！保持饱食度 ≥10 每回合回 1 血；夜里小心怪物。`)
+      notices.push({
+        text: `❤️ 生命只剩 ${world.hp}/20！保持饱食度 ≥10 每回合回 1 血；夜里小心怪物。`,
+        urgent: true,
+      })
     }
   } else if (world.hp >= WARN_RESET_AT) {
     world.warnedHp = false
@@ -532,9 +549,15 @@ export function onTurn(world: World, cfg: SurvivalConfig): TurnOutcome {
   }
 
   if (isNight(world, cfg)) {
-    const mob = rollMob(world, cfg)
-    if (mob?.cause !== undefined) outcome.cause = mob.cause
-    else if (mob?.reason !== undefined) pushLog(world, `${mob.reason} 你的回合被打断了。`)
+    // 入夜第一回合：决策窗口，不刷怪（collectTransitions 随后发入夜播报，
+    // 玩家有安全的一回合回复"睡觉"）；此后每个回合/动作都正常刷怪
+    if (!world.nightNotified) {
+      // 宽限：本回合不刷怪
+    } else {
+      const mob = rollMob(world, cfg)
+      if (mob?.cause !== undefined) outcome.cause = mob.cause
+      else if (mob?.reason !== undefined) pushLog(world, `${mob.reason} 你的回合被打断了。`)
+    }
   } else {
     rollSheep(world)
   }
@@ -769,6 +792,19 @@ export function craft(world: World, recipeId: string, cfg: SurvivalConfig): { ok
   const unlock = UNLOCK_ANNOUNCEMENTS[recipe.produces as ItemId]
   if (unlock !== undefined) pushLog(world, unlock)
   return { ok: true, message: `✅ 合成 ${recipe.name}×${recipe.amount}！${recipe.note}${unlock !== undefined ? ` ${unlock}` : ''}` }
+}
+
+/**
+ * 白天休息：有床即可，只把床设置为重生点（备份由引擎在回退层完成），
+ * 不跳过夜晚、不推进昼夜、不达成就（「甜甜的梦」属于夜晚真正睡觉）。
+ */
+export function rest(world: World, cfg: SurvivalConfig): { ok: boolean; message: string } {
+  void cfg
+  if (world.dead) return { ok: false, message: '☠️ 你已经死了——死亡不是休息。' }
+  if ((world.items.bed ?? 0) <= 0) return { ok: false, message: '你没有床。羊毛×3 + 木板×3 合成（白天偶尔会遇到羊）。' }
+  world.respawnBed = true
+  pushLog(world, '🛏️ 你白天在床上休息了一会儿——重生点已更新（死亡时工作区文件与对话将回退到此刻）。')
+  return { ok: true, message: '🛏️ 白天休息了一会儿——重生点已更新（死亡时工作区文件与对话将回退到此刻；夜晚睡觉还能跳过夜晚）。' }
 }
 
 export function sleep(world: World, cfg: SurvivalConfig): { ok: boolean; message: string } {

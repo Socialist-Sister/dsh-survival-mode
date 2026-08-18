@@ -12,7 +12,7 @@ import assert from 'node:assert/strict'
 import {
   MAX_HP, MAX_HUNGER, DEFAULT_CONFIG,
   createWorld, isNight, nightLength,
-  settle, onTurn, rollMob, mine, craft, eat, sleep, die, deathDeny,
+  settle, onTurn, rollMob, mine, craft, eat, sleep, rest, die, deathDeny,
   RECIPES, GATES, HEAVY_TOOLS, FREE_TOOLS, MOBS, ACHIEVEMENTS,
   MATERIAL_LABELS, ITEM_LABELS, TOOL_DURABILITY,
 } from '../src/game.ts'
@@ -95,15 +95,15 @@ test('createWorld：满状态出生，继承存档', () => {
 
 // ── 昼夜 ──────────────────────────────────────────────────────────────────
 
-test('昼夜：8 回合一天，最后 1/3 是夜晚', () => {
+test('昼夜：8 回合一天，白天与夜晚各半', () => {
   const cfg = { ...DEFAULT_CONFIG, dayLengthTurns: 8 }
   const world = createWorld('t', { xp: 0, day: 1, deaths: 0, respawnBed: false, achievements: [] })
-  assert.equal(nightLength(cfg), Math.floor(8 / 3)) // 2
+  assert.equal(nightLength(cfg), Math.floor(8 / 2)) // 4
   assert.equal(isNight(world, cfg), false, '第 0 回合是白天')
-  world.turnsToday = 5
-  assert.equal(isNight(world, cfg), false)
-  world.turnsToday = 6
-  assert.equal(isNight(world, cfg), true, '第 6 回合入夜')
+  world.turnsToday = 3
+  assert.equal(isNight(world, cfg), false, '第 3 回合还是白天')
+  world.turnsToday = 4
+  assert.equal(isNight(world, cfg), true, '第 4 回合入夜')
 })
 
 test('onTurn：回合推进昼夜，跨天返回 dayChanged', () => {
@@ -143,6 +143,24 @@ test('onTurn：和平难度无条件回血', () => {
   world.hunger = 3
   onTurn(world, cfg)
   assert.equal(world.hp, 9)
+})
+
+test('入夜第一回合：决策窗口不刷怪，之后每个回合恢复判定', () => {
+  const { cfg, world } = freshWorld()
+  world.turnsToday = cfg.dayLengthTurns - nightLength(cfg) - 1 // 入夜前最后一回合
+  onTurn(world, cfg)
+  assert.equal(isNight(world, cfg), true, '已入夜')
+  assert.equal(world.nightEncounters, 0, '入夜第一回合没有遭遇（决策窗口）')
+  assert.equal(world.nightNotified, true, '入夜播报已发出')
+
+  // 之后的工具调用立即恢复刷怪判定（随机结果不可断言，但判定通道已开启）
+  settle(world, cfg, 'bash')
+  assert.ok(world.nightEncounters === 0 || world.nightEncounters === 1, '工具调用正常判定（0 或 1 次遭遇）')
+
+  // 之后的对话回合同样恢复判定
+  const before = world.nightEncounters
+  onTurn(world, cfg)
+  assert.ok(world.nightEncounters === before || world.nightEncounters === before + 1, '回合正常判定（至多 +1 次遭遇）')
 })
 
 // ── 结算：饥饿与怪物 ──────────────────────────────────────────────────────
@@ -332,12 +350,12 @@ test('eat：没面包 / 已死亡拒绝', () => {
   assert.equal(eat(world, 'bread', cfg).ok, false, '死亡不能吃')
 })
 
-// ── 睡眠 ──────────────────────────────────────────────────────────────────
+// ── 睡眠 / 休息 ────────────────────────────────────────────────────────────
 
 test('sleep：夜晚+有床才能睡，跳过夜晚并设重生点', () => {
   const { cfg, world } = freshWorld()
   world.items.bed = 1
-  assert.equal(sleep(world, cfg).ok, false, '白天不能睡')
+  assert.equal(sleep(world, cfg).ok, false, '白天不能睡（夜晚专用）')
 
   world.turnsToday = cfg.dayLengthTurns - 1 // 入夜
   const r = sleep(world, cfg)
@@ -346,6 +364,20 @@ test('sleep：夜晚+有床才能睡，跳过夜晚并设重生点', () => {
   assert.equal(world.turnsToday, 0)
   assert.equal(world.respawnBed, true, '床设为重生点')
   assert.ok(world.achievements.includes('sweet-dreams'), '甜甜的梦成就')
+})
+
+test('rest：白天有床可休息——更新重生点但不跳夜、不达成就', () => {
+  const { cfg, world } = freshWorld()
+  assert.equal(rest(world, cfg).ok, false, '没有床不能休息')
+
+  world.items.bed = 1
+  const r = rest(world, cfg)
+  assert.equal(r.ok, true)
+  assert.equal(world.day, 1, '白天休息不跳夜')
+  assert.equal(world.turnsToday, 0, '不推进昼夜')
+  assert.equal(world.respawnBed, true, '重生点已更新（备份由引擎层完成）')
+  assert.ok(!world.achievements.includes('sweet-dreams'), '甜甜的梦只属于夜晚睡觉')
+  assert.match(r.message, /白天休息/)
 })
 
 // ── 死亡 ──────────────────────────────────────────────────────────────────

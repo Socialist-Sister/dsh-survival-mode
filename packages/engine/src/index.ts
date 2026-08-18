@@ -32,7 +32,7 @@ import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import * as game from './game'
-import { DEFAULT_EXCLUDES, backupRoot, removeSnapshot, restoreWorkspace, snapshotWorkspace } from './respawn'
+import { CONVERSATION_FILE, DEFAULT_EXCLUDES, backupRoot, removeSnapshot, restoreWorkspace, saveConversation, snapshotWorkspace } from './respawn'
 
 export const name = 'survival-engine'
 export const inject = [] as const
@@ -181,19 +181,27 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
   }
 
   // ── 跃迁播报：把状态变化推成一条插件来源的用户消息（玩家可见，不推进时间）
+  // urgent（重要状态）走 steer 插队：下一个 step 边界立即送达；
+  // 普通播报走 followup 排队：不打断 agent 正在进行的工具链。
   const agents = ctx.get('agents') as
-    | { get(id: string): { followup(message: unknown): void } | undefined }
+    | {
+        get(id: string): {
+          followup(message: unknown): void
+          steer(message: unknown): void
+          session?: unknown
+        } | undefined
+      }
     | undefined
-  const notify = (sessionId: string, text: string): void => {
+  const notify = (sessionId: string, text: string, urgent = false): void => {
     try {
       const agent = agents?.get(sessionId)
       if (agent === undefined) return
-      agent.followup(
-        createUserMessage({
-          content: [{ type: 'text', text }],
-          source: { kind: 'plugin', plugin: '@dsh-survival/engine' },
-        }),
-      )
+      const message = createUserMessage({
+        content: [{ type: 'text', text }],
+        source: { kind: 'plugin', plugin: '@dsh-survival/engine' },
+      })
+      if (urgent) agent.steer(message)
+      else agent.followup(message)
     } catch {
       /* 播报失败不影响游戏进行 */
     }
@@ -223,6 +231,61 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
     return world
   }
 
+  // ── 对话摘要：从会话事件流提取最近的真实对话（重生点 = 文件 + 对话）────
+  const extractText = (content: unknown): string => {
+    try {
+      if (!Array.isArray(content)) return ''
+      const parts: string[] = []
+      for (const block of content) {
+        if (block && typeof block === 'object' && (block as { type?: string }).type === 'text') {
+          const text = (block as { text?: unknown }).text
+          if (typeof text === 'string') parts.push(text)
+        }
+      }
+      return parts.join('\n').trim()
+    } catch {
+      return ''
+    }
+  }
+  const conversationMarkdown = (session: any): string => {
+    try {
+      const events = session?.events as
+        | { type: string; data: { content?: unknown; source?: { kind?: string } } }[]
+        | undefined
+      if (!Array.isArray(events)) return ''
+      const lines: string[] = []
+      for (const event of events) {
+        if (event.type === 'user/message') {
+          const sourceKind = event.data?.source?.kind
+          if (sourceKind !== undefined && sourceKind !== 'user') continue // 只保留真实用户消息
+          const text = extractText(event.data?.content)
+          if (text.length > 0) lines.push(`👤 ${text}`)
+        } else if (event.type === 'assistant/message') {
+          const text = extractText(event.data?.content)
+          if (text.length > 0) lines.push(`🤖 ${text}`)
+        }
+      }
+      const recent = lines.slice(-60) // 最近 60 条消息（约一个会话的近期上下文）
+      if (recent.length === 0) return ''
+      return ['# 重生点对话摘要', '', `> 存档于 ${new Date().toISOString()}，共提取最近 ${recent.length} 条消息。`, '', ...recent, ''].join('\n')
+    } catch {
+      return ''
+    }
+  }
+
+  /** 设置重生点：备份工作区文件 + 导出对话摘要（白天休息与夜晚睡觉共用）。 */
+  const backupRespawn = async (sessionId: string, cwd: string, session: any): Promise<string> => {
+    const backupDir = backupDirOf(sessionId)
+    const result = await chain(sessionId, async () => {
+      await saveConversation(backupDir, conversationMarkdown(session))
+      return snapshotWorkspace(cwd, backupDir, excludes())
+    })
+    if (result.ok) {
+      return `📁 重生点已更新：工作区备份 ${result.files} 个文件 + 对话摘要（${CONVERSATION_FILE}）。死亡时文件将回退到此状态。`
+    }
+    return `⚠️ 重生点备份失败：${result.error ?? '未知错误'}（死亡时将回退到上一个备份）。`
+  }
+
   /** 死亡收尾：游戏结算 + 顶层会话的文件回退 + 向玩家播报死亡。 */
   const kill = async (world: game.World, cause: string): Promise<string> => {
     if (world.dead && world.death !== undefined) return ''
@@ -248,11 +311,12 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
     notify(
       world.id,
       `☠️ ${world.death?.message ?? '你死了'}。掉落：${dropped}；经验 −${world.death?.droppedXp ?? 0}。${respawnNote}本会话已死亡——写下遗言吧；每个会话都是独立存档，新会话从第 1 天重新开始。`,
+      true,
     )
     return respawnNote
   }
 
-  // ── 会话开始：建立世界 + 出生点文件快照（独立存档）──────────────────────
+  // ── 会话开始：建立世界 + 出生点快照（文件 + 对话摘要，独立存档）─────────
   ctx.on('agent/session-start', (payload: any) => {
     try {
       const agent = payload?.agent as AgentLike | undefined
@@ -262,9 +326,11 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
       const meta = metaOf(id)
       if (!meta.topLevel || meta.cwd === undefined || meta.cwd.length === 0) return
       void chain(id, async () => {
-        const result = await snapshotWorkspace(meta.cwd as string, backupDirOf(id), excludes())
+        const backupDir = backupDirOf(id)
+        await saveConversation(backupDir, conversationMarkdown(agent?.session))
+        const result = await snapshotWorkspace(meta.cwd as string, backupDir, excludes())
         if (result.ok) {
-          notify(id, `📁 出生点已建立：工作区已备份（${result.files} 个文件）。死亡时文件将回退到此状态；睡过觉后重生点会更新为当前状态。`)
+          notify(id, `📁 出生点已建立：工作区已备份（${result.files} 个文件）+ 对话摘要。死亡时文件将回退到此状态；睡过觉后重生点会更新为当前状态。`, true)
         } else {
           ctx.logger?.warn?.(`dsh-survival: 出生点快照失败 (${result.error ?? '未知'}) — 死亡时将无法回退文件`)
         }
@@ -284,7 +350,7 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
     const world = worlds.get(sessionId) ?? worldFor(sessionId)
     const outcome = game.onTurn(world, cfg())
     if (outcome.cause !== undefined) void kill(world, outcome.cause)
-    for (const notice of outcome.notices ?? []) notify(sessionId, notice)
+    for (const notice of outcome.notices ?? []) notify(sessionId, notice.text, notice.urgent)
   })
 
   // ── 工具门禁 + 生存结算（作用域过滤：只拦本预设的会话）──────────────────
@@ -322,7 +388,7 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
     if (outcome.deny !== undefined) {
       return { kind: 'deny', reason: outcome.deny }
     }
-    for (const notice of outcome.notices ?? []) notify(sessionId, notice)
+    for (const notice of outcome.notices ?? []) notify(sessionId, notice.text, notice.urgent)
     return next()
   })
 
@@ -366,17 +432,18 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
     },
     sleep: async (sessionId: string) => {
       const world = worldFor(sessionId)
-      const outcome = game.sleep(world, cfg())
-      // 新重生点：睡觉成功即覆盖文件备份（await 完成再返回，保证立即可回退）
+      // 夜晚 + 有床 = 睡觉（跳过夜晚 + 成就）；白天 + 有床 = 休息（只更新重生点备份）
+      const outcome = game.isNight(world, cfg())
+        ? game.sleep(world, cfg())
+        : (world.items.bed ?? 0) > 0
+          ? game.rest(world, cfg())
+          : game.sleep(world, cfg()) // 无床：复用"你没有床"的错误
+      // 设置重生点：备份工作区文件 + 导出对话摘要（await 完成再返回，保证立即可回退）
       if (outcome.ok) {
         const meta = metaOf(sessionId)
         if (meta.topLevel && meta.cwd !== undefined && meta.cwd.length > 0) {
-          const result = await chain(sessionId, () => snapshotWorkspace(meta.cwd as string, backupDirOf(sessionId), excludes()))
-          if (result.ok) {
-            outcome.message += ` 📁 重生点已更新：工作区备份 ${result.files} 个文件（死亡时文件将回退到此状态）。`
-          } else {
-            outcome.message += ` ⚠️ 重生点备份失败：${result.error ?? '未知错误'}（死亡时将回退到上一个备份）。`
-          }
+          const session = agents?.get(sessionId)?.session as any
+          outcome.message += ` ${await backupRespawn(sessionId, meta.cwd as string, session)}`
         }
       }
       return outcome

@@ -22,7 +22,7 @@ Minecraft survival rules × real coding work — an entertainment-focused agent 
 
 Every rule is **hard-settled by the engine** (not prompt theater), every game concept maps to vanilla Minecraft survival, and every plugin mechanism follows the official preset spec (same architecture as the dsh-collaboration suite).
 
-**Suite version 0.1.1**: engine 0.14.0 · tool-survival 0.6.1 · hud 0.1.3 · [Installation guide](docs/installation.md) · [GitHub Releases](https://github.com/Socialist-Sister/dsh-survival-mode/releases)
+**Suite version 0.1.2**: engine 0.15.0 · tool-survival 0.6.2 · hud 0.1.3 · [Installation guide](docs/installation.md) · [GitHub Releases](https://github.com/Socialist-Sister/dsh-survival-mode/releases)
 
 **Highlights**
 
@@ -86,16 +86,17 @@ This file is the complete manual: world rules, survival tools, crafting recipes,
 
 The engine pushes a message only at the **moment a state changes** (no spam; re-armed after recovery):
 
-| Event | Notice |
-|---|---|
-| 🌙 Night falls | Night warning + torch/bed advice |
-| ☀️ Dawn report | Last night's encounter count with repel/block/hurt breakdown (the ledger for sword/shield durability); peaceful nights are announced too |
-| 🍖 Hunger ≤ 4 | Low-hunger warning + bread instructions |
-| ❤️ HP ≤ 4 | Critical-HP warning + healing conditions |
-| ⛏️🔭🔴 Unlock | Crafting the pickaxe/spyglass/repeater announces the unlocked ability |
-| ☠️ Death | Death message + drop list + file-rollback notice |
+| Event | Notice | Delivery |
+|---|---|---|
+| 🌙 Night falls | Night warning + torch/bed advice | **steer (immediate)** |
+| ☀️ Dawn report | Last night's encounter count with repel/block/hurt breakdown (the ledger for sword/shield durability); peaceful nights are announced too | queued |
+| 🍖 Hunger ≤ 4 | Low-hunger warning + bread instructions | **steer (immediate)** |
+| ❤️ HP ≤ 4 | Critical-HP warning + healing conditions | **steer (immediate)** |
+| ⛏️🔭🔴 Unlock | Crafting the pickaxe/spyglass/repeater announces the unlocked ability | — (in the craft result) |
+| ☠️ Death | Death message + drop list + file-rollback notice | **steer (immediate)** |
+| 📁 Spawn/respawn backup | Backup done (file count + conversation digest) | **steer (immediate)** |
 
-Notices are plugin-sourced messages and **do not advance game time** (only real user messages count as dialogue turns).
+Notices are plugin-sourced messages and **do not advance game time** (only real user messages count as dialogue turns). Steered messages are delivered at the agent's next step boundary without interrupting the tool call in flight; ordinary notices are queued.
 
 ---
 
@@ -140,7 +141,7 @@ Defense — see [items](#crafting--items): torches suppress spawns (chance ×0.8
 | `survival_status` | Full state: HP/hunger/XP, day & phase, materials, inventory, gate status, advancements, recent events, and the complete recipe book. **Look here first when unsure.** |
 | `survival_craft` | Craft by recipe. Parameter `recipe` takes a recipe id (e.g. `bread`, `iron-pickaxe`, `bed`) — see [the recipe book](#crafting--items). Failures tell you what's missing. |
 | `survival_eat` | Eat to restore hunger. Currently only bread (`food` defaults to `bread`), +8 hunger each. |
-| `survival_sleep` | Sleep: **only at night and only with a bed**. Skips the night, advances to the next day, and sets the bed as your respawn point — every sleep updates the workspace backup to the current state (death rolls files back to the latest snapshot). |
+| `survival_sleep` | Use the bed to set/refresh your respawn point: **at night** it sleeps (skips the night, grants Sweet Dreams); **by day** it rests (no night skip). Both back up the workspace files + a conversation digest as your respawn point (death rolls files back to the latest snapshot). |
 
 ---
 
@@ -211,7 +212,7 @@ Iron/copper ores must be smelted in a furnace before crafting; redstone, diamond
 | `iron-sword` | iron sword | iron ×2 + stick ×1 | 60% night counter (+3 XP, durability 100; costs on every attempt) |
 | `diamond-sword` | diamond sword | diamond ×2 + stick ×1 | Sharper: 90% counter (+5 XP, durability 200; costs on every attempt); used **first** when lower-tier swords are also held |
 | `shield` | shield | planks ×6 + iron ×1 | 50% chance to block a hit (durability 120; every block attempt costs −1, blocked or not; cannot stop skeleton arrows) |
-| `bed` | bed | wool ×3 + planks ×3 | `survival_sleep` skips the night + sets respawn point (death rolls files back to the respawn snapshot; the bed itself never drops) |
+| `bed` | bed | wool ×3 + planks ×3 | `survival_sleep` sleeps at night (skips the night) / rests by day (no skip); both set the respawn point (backup files + conversation; the bed itself never drops) |
 | `spyglass` | spyglass | amethyst ×1 + copper ×2 | Unlocks `web_search` (permanent, unbreakable like vanilla) |
 
 **Redstone**
@@ -264,7 +265,7 @@ Calls without the required item are denied with the recipe hint. `tool-ralph` do
 - **Death**: HP hits 0 → vanilla death message ("You were blown up by a Creeper!") → **your whole inventory and materials drop** (the bed stays) → **XP halved** → **file rollback**: the workspace is restored to the latest snapshot (respawn point, or spawn point if you never slept) — files created/modified/deleted after the snapshot are lost.
 - After death the session is over: every tool except survival tools is denied, the status bar shows ☠️ — write your last words, then close the session.
 - **Independent saves**: every session is a separate life and save — day, XP, advancements, and inventory never carry across sessions. A new session starts at day 1, 0 XP, and an empty backpack.
-- **File respawn points**: the engine snapshots your workspace at session start into `${DSH_HOME}/survival-respawns/<session-id>/` (spawn point); every `survival_sleep` refreshes the backup (new respawn point). Death rolls back to the latest snapshot. Generated artifacts (`node_modules` / `.git` / `dist`, configurable) are excluded from both backup and rollback — reinstall/rebuild for a consistent tree. Subagent deaths never touch files.
+- **File respawn points**: the engine snapshots your workspace + a conversation digest at session start into `${DSH_HOME}/survival-respawns/<session-id>/` (spawn point); `survival_sleep` refreshes the backup (new respawn point) both when sleeping at night (skips the night) and resting by day (no skip). Death rolls back to the latest snapshot. Generated artifacts (`node_modules` / `.git` / `dist`, configurable) are excluded from both backup and rollback — reinstall/rebuild for a consistent tree. Subagent deaths never touch files.
 - **Hardcore**: same numbers as hard difficulty (spawn chance ×1.5, damage ×2) and death rolls files back the same way — with per-session saves there is no cross-session save to delete, so "death wipes the save" is gone.
 
 ---
@@ -305,7 +306,7 @@ The `dsh-survival` section of `${DSH_HOME}\settings.yaml` (all defaults apply wh
 ```yaml
 dsh-survival:
   difficulty: normal        # peaceful | easy | normal | hard | hardcore
-  dayLengthTurns: 8         # dialogue turns per day (user messages); the last 1/3 is night
+  dayLengthTurns: 8         # dialogue turns per day (user messages); day and night split evenly
   mobChance: 0.3            # base spawn chance per night action (0–1)
   torchMobFactor: 0.8       # spawn-chance multiplier while holding a torch (0 = immunity)
   hungerPerAction: 1        # hunger cost per tool call
@@ -329,7 +330,7 @@ dsh-survival:
 | Field | Meaning | Default |
 |---|---|---|
 | `difficulty` | Tier, table above | `normal` |
-| `dayLengthTurns` | Turns per day; the last `floor(value/3)` turns are night | `8` |
+| `dayLengthTurns` | Turns per day; night = `floor(value/2)` turns (day and night split evenly) | `8` |
 | `mobChance` | Base spawn chance per night action (turn or tool call) | `0.3` |
 | `torchMobFactor` | Spawn-chance multiplier while holding a torch | `0.8` |
 | `hungerPerAction` | Hunger cost per ordinary tool call | `1` |
@@ -352,7 +353,7 @@ Every session is an **independent save** — world state is session memory and n
 | Data | Lifetime |
 |---|---|
 | World day, XP, deaths, advancements, respawn point (bed), inventory | **Session memory — independent save**: no cross-session state; a new session starts at day 1, 0 XP, empty backpack |
-| File respawn point (workspace snapshot) | Snapshotted at session start (spawn point), refreshed on every sleep (respawn point); stored in `${DSH_HOME}/survival-respawns/<session-id>/`, removed when the session ends |
+| File respawn point (workspace snapshot + conversation digest) | Snapshotted at session start (spawn point), refreshed on every sleep or day rest (respawn point); stored in `${DSH_HOME}/survival-respawns/<session-id>/` (includes `conversation.md`), removed when the session ends |
 | Death rollback | On death the workspace is restored to the latest snapshot: files created after it are deleted, modified files reverted, deleted files restored; excluded dirs (node_modules etc.) are untouched |
 | Death info (cause and drops) | Shown in-session (death screen), gone with the session |
 

@@ -106,7 +106,7 @@ export function apply(ctx: any) {
   ctx.tools.register(
     defineTool({
       name: 'survival_sleep',
-      description: '睡在床上：跳过夜晚（夜晚刷怪）并把床设置为重生点——死亡时工作区文件会回退到重生点备份（每次睡觉都会更新备份）。只能在夜晚且有床时使用（羊毛×3+木板×3 合成床）。',
+      description: '用床设置/更新重生点：夜晚睡觉（跳过夜晚、达成就），白天休息（不跳夜）——两种都会把工作区文件与对话摘要备份为重生点，死亡时文件回退到最近备份。需要有床（羊毛×3+木板×3 合成）。',
       parameters: {},
       output: {
         schema: { type: 'string' },

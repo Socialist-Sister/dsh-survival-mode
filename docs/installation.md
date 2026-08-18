@@ -105,7 +105,7 @@ cp -r <repo>/config/agent-presets/survival ~/.dsh/.agent-presets/
 ```yaml
 dsh-survival:
   difficulty: normal        # peaceful | easy | normal | hard | hardcore
-  dayLengthTurns: 8         # 一天包含的对话回合数（用户消息），最后 1/3 为夜晚
+  dayLengthTurns: 8         # 一天包含的对话回合数（用户消息），白天与夜晚各半
   mobChance: 0.3            # 夜晚每个回合/工具调用的刷怪基础概率
   torchMobFactor: 0.8       # 持有火把时刷怪概率的倍率（光照压制；0=免疫）
   hungerPerAction: 1        # 普通工具调用的饥饿消耗

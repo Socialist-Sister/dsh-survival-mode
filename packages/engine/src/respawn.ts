@@ -20,6 +20,9 @@
 import { mkdir, readFile, readdir, rm, writeFile, copyFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 
+/** 快照目录里的对话摘要文件名（与 manifest.json 同级，不属于工作区）。 */
+export const CONVERSATION_FILE = 'conversation.md'
+
 /** 默认排除的目录名（任意深度按 basename 匹配）：全部是可再生生成物。 */
 export const DEFAULT_EXCLUDES: string[] = [
   'node_modules',
@@ -158,6 +161,20 @@ export async function removeSnapshot(backupDir: string): Promise<void> {
     await rm(backupDir, { recursive: true, force: true })
   } catch {
     /* 清理失败不影响会话 */
+  }
+}
+
+/**
+ * 把对话摘要写入快照目录（conversation.md）。重生点 = 文件 + 对话一起存档；
+ * 该文件不属于工作区，死亡回退时不会被删除——随快照保留到会话结束。
+ */
+export async function saveConversation(backupDir: string, markdown: string): Promise<boolean> {
+  try {
+    await mkdir(backupDir, { recursive: true })
+    await writeFile(join(backupDir, CONVERSATION_FILE), markdown, 'utf8')
+    return true
+  } catch {
+    return false
   }
 }
 
