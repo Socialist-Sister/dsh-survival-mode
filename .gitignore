@@ -4,5 +4,11 @@ lib/
 *.tgz
 .DS_Store
 
+# pnpm 缓存（容器挂载工作区时生成）
+.pnpm-store/
+
+# 测试转译产物（node:test 前由 esbuild 生成）
+packages/engine/test-dist/
+
 # 本地测试产物（生存模式会话写进工作区的测试笔记，不随仓库发布）
 dev-sandbox/

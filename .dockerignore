@@ -1,0 +1,9 @@
+node_modules/
+**/node_modules/
+dist/
+lib/
+*.tgz
+.git/
+dev-sandbox/
+dsh-survival-sessions.md
+*.bak

@@ -405,10 +405,23 @@ dsh-survival:
 pnpm install
 pnpm run build       # tsup 构建 lib/（hud 含 client 包）
 pnpm run typecheck   # 先 build 再 typecheck（工具包依赖引擎的 d.ts）
+pnpm run test        # 引擎规则层单元测试（node:test，34 用例）
 pnpm run pack        # 打包 tgz 到 dist/
 ```
 
 支持 Windows / Linux / WSL / macOS（脚本均为跨平台写法）。安装到 DeepSeek Harness 见 [docs/installation.md](docs/installation.md)——含三端命令对照与开发模式（符号链接直指仓库，改代码 build 后重启即生效）。
+
+### 测试与 Docker 验证
+
+- **单元测试**：`packages/engine/test/game.test.ts` 覆盖引擎规则层（配置基线/昼夜/门禁/结算/挖矿/合成/铁砧修复/进食/睡眠/死亡掉落/成就/完整周期），Node 内置 `node:test`，零额外依赖。运行 `pnpm test`（先 build，工具包依赖引擎的 d.ts）。
+- **Docker 全闭环**：`Dockerfile` 在容器内完成 build → typecheck → test → pack 全流程，并校验每个 tgz 含 `package.json` 与 `lib/index.js`。本地验证：
+
+  ```bash
+  docker build -t dsh-survival-test .
+  docker run --rm dsh-survival-test   # 列出 dist/ 三个 tgz（构建时已全量验证）
+  ```
+
+  多 Node 版本矩阵（如 `node:20` / `node:22` / `node:24`）只需改 Dockerfile 首行 `FROM node:XX` 分别构建。注意 pnpm 10+ 需要 `node:sqlite`（Node ≥22.5），Node 20 镜像必须用 pnpm 9.x（Dockerfile 已固定 `pnpm@9.15.0`）。
 
 ---
 

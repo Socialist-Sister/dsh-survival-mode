@@ -4,9 +4,11 @@
   "version": "0.1.0",
   "description": "DeepSeek Harness 生存模式：Minecraft 生存规则 × 真实编码工作的娱乐性 Agent 预设套件",
   "license": "MIT",
+  "packageManager": "pnpm@9.15.0",
   "scripts": {
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
     "pack": "pnpm -r run pack"
   },
   "devDependencies": {

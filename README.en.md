@@ -407,10 +407,23 @@ Status-bar icons are from [OpenMoji](https://openmoji.org) (**CC BY-SA 4.0**, at
 pnpm install
 pnpm run build       # tsup builds lib/ (hud includes the client bundle)
 pnpm run typecheck   # build first, then typecheck (tool-survival needs engine's d.ts)
+pnpm run test        # engine rules unit tests (node:test, 34 cases)
 pnpm run pack        # packs tarballs into dist/
 ```
 
 Works on Windows / Linux / WSL / macOS (all scripts are cross-platform). Installing into DeepSeek Harness: see [docs/installation.md](docs/installation.md) — it covers all three platforms and the dev-mode symlink workflow (point the packages at your checkout, rebuild, restart DSH).
+
+### Testing & Docker
+
+- **Unit tests**: `packages/engine/test/game.test.ts` covers the engine rules layer (config baseline / day-night / gates / settlement / mining / crafting / anvil repair / eating / sleeping / death drops / achievements / full lifecycle) with Node's built-in `node:test` — zero extra dependencies. Run `pnpm test` (build first; tool-survival's types depend on engine's d.ts).
+- **Docker full loop**: the `Dockerfile` runs build → typecheck → test → pack inside a container and verifies each tarball contains `package.json` and `lib/index.js`:
+
+  ```bash
+  docker build -t dsh-survival-test .
+  docker run --rm dsh-survival-test   # lists the three dist/ tarballs (fully verified at build time)
+  ```
+
+  For a Node-version matrix (e.g. `node:20` / `node:22` / `node:24`), change the `FROM node:XX` line and rebuild. Note: pnpm 10+ requires `node:sqlite` (Node ≥22.5), so the Node 20 image must use pnpm 9.x (the Dockerfile pins `pnpm@9.15.0`).
 
 ---
 
