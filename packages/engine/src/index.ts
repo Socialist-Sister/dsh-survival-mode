@@ -32,7 +32,7 @@ import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import * as game from './game'
-import { CONVERSATION_FILE, DEFAULT_EXCLUDES, backupRoot, removeSnapshot, restoreWorkspace, saveConversation, snapshotWorkspace } from './respawn'
+import { CONVERSATION_FILE, DEFAULT_EXCLUDES, backupRoot, loadWorldSync, removeSnapshot, restoreWorkspace, saveConversation, saveWorld, snapshotWorkspace } from './respawn'
 
 export const name = 'survival-engine'
 export const inject = [] as const
@@ -227,8 +227,29 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
     if (world === undefined) {
       world = game.createWorld(sessionId, FRESH_STATS)
       worlds.set(sessionId, world)
+      // 同会话重启恢复：world.json 随文件重生点一起落盘（独立存档跟随会话 id，
+      // 新会话仍从零开始；world.json 随备份目录在会话结束时清理）
+      const meta = metaOf(sessionId)
+      if (meta.topLevel && meta.cwd !== undefined && meta.cwd.length > 0) {
+        const loaded = loadWorldSync<Partial<game.World>>(backupDirOf(sessionId))
+        if (loaded !== undefined && typeof loaded === 'object') {
+          Object.assign(world, loaded)
+          if (!world.dead) {
+            game.pushLog(world, '📂 世界已恢复：重启前的生命/饥饿/天数/经验/背包已加载。')
+          }
+        }
+      }
     }
     return world
+  }
+
+  /** 世界状态落盘（world.json）：状态变更后调用；只对顶层会话生效。 */
+  const persistWorld = (sessionId: string, world: game.World): Promise<void> => {
+    const meta = metaOf(sessionId)
+    if (!meta.topLevel) return Promise.resolve()
+    return chain(sessionId, async () => {
+      await saveWorld(backupDirOf(sessionId), world)
+    })
   }
 
   // ── 对话摘要：从会话事件流提取最近的真实对话（重生点 = 文件 + 对话）────
@@ -273,15 +294,21 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
     }
   }
 
-  /** 设置重生点：备份工作区文件 + 导出对话摘要（白天休息与夜晚睡觉共用）。 */
-  const backupRespawn = async (sessionId: string, cwd: string, session: any): Promise<string> => {
+  /** 设置重生点：备份工作区文件 + 导出对话摘要 + 世界状态（白天休息与夜晚睡觉共用）。
+   *  注意顺序：snapshotWorkspace 会清空备份目录重建，conversation.md / world.json
+   *  必须在快照之后写入。 */
+  const backupRespawn = async (sessionId: string, cwd: string, world: game.World, session: any): Promise<string> => {
     const backupDir = backupDirOf(sessionId)
     const result = await chain(sessionId, async () => {
-      await saveConversation(backupDir, conversationMarkdown(session))
-      return snapshotWorkspace(cwd, backupDir, excludes())
+      const snap = await snapshotWorkspace(cwd, backupDir, excludes())
+      if (snap.ok) {
+        await saveConversation(backupDir, conversationMarkdown(session))
+        await saveWorld(backupDir, world)
+      }
+      return snap
     })
     if (result.ok) {
-      return `📁 重生点已更新：工作区备份 ${result.files} 个文件 + 对话摘要（${CONVERSATION_FILE}）。死亡时文件将回退到此状态。`
+      return `📁 重生点已更新：工作区备份 ${result.files} 个文件 + 对话摘要（${CONVERSATION_FILE}）+ 世界状态（world.json）。死亡时文件将回退到此状态，重启也会恢复进度。`
     }
     return `⚠️ 重生点备份失败：${result.error ?? '未知错误'}（死亡时将回退到上一个备份）。`
   }
@@ -308,6 +335,8 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
       }
     }
     const dropped = world.death?.dropped.join('、') ?? '空手'
+    // 死亡状态落盘（重启后恢复的会话仍是死亡状态，不会"复活"）
+    await persistWorld(world.id, world)
     notify(
       world.id,
       `☠️ ${world.death?.message ?? '你死了'}。掉落：${dropped}；经验 −${world.death?.droppedXp ?? 0}。${respawnNote}本会话已死亡——写下遗言吧；每个会话都是独立存档，新会话从第 1 天重新开始。`,
@@ -316,21 +345,23 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
     return respawnNote
   }
 
-  // ── 会话开始：建立世界 + 出生点快照（文件 + 对话摘要，独立存档）─────────
+  // ── 会话开始：建立世界（含重启恢复）+ 出生点快照（文件 + 对话 + 世界）──
   ctx.on('agent/session-start', (payload: any) => {
     try {
       const agent = payload?.agent as AgentLike | undefined
       const id = remember(agent)
       if (id.length === 0) return
-      worldFor(id)
+      const world = worldFor(id)
       const meta = metaOf(id)
       if (!meta.topLevel || meta.cwd === undefined || meta.cwd.length === 0) return
       void chain(id, async () => {
         const backupDir = backupDirOf(id)
-        await saveConversation(backupDir, conversationMarkdown(agent?.session))
         const result = await snapshotWorkspace(meta.cwd as string, backupDir, excludes())
         if (result.ok) {
-          notify(id, `📁 出生点已建立：工作区已备份（${result.files} 个文件）+ 对话摘要。死亡时文件将回退到此状态；睡过觉后重生点会更新为当前状态。`, true)
+          // 快照会清空备份目录重建：conversation.md 与 world.json 必须随后写入
+          await saveConversation(backupDir, conversationMarkdown(agent?.session))
+          await saveWorld(backupDir, world)
+          notify(id, `📁 出生点已建立：工作区已备份（${result.files} 个文件）+ 对话摘要 + 世界状态。死亡时文件将回退到此状态；睡过觉后重生点会更新为当前状态。`, true)
         } else {
           ctx.logger?.warn?.(`dsh-survival: 出生点快照失败 (${result.error ?? '未知'}) — 死亡时将无法回退文件`)
         }
@@ -351,6 +382,8 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
     const outcome = game.onTurn(world, cfg())
     if (outcome.cause !== undefined) void kill(world, outcome.cause)
     for (const notice of outcome.notices ?? []) notify(sessionId, notice.text, notice.urgent)
+    // 回合结算落盘：饥饿/回血/昼夜/怪物/羊毛
+    void persistWorld(sessionId, world)
   })
 
   // ── 工具门禁 + 生存结算（作用域过滤：只拦本预设的会话）──────────────────
@@ -389,6 +422,8 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
       return { kind: 'deny', reason: outcome.deny }
     }
     for (const notice of outcome.notices ?? []) notify(sessionId, notice.text, notice.urgent)
+    // 工具结算落盘：饥饿/怪物/门禁耐久
+    void persistWorld(sessionId, world)
     return next()
   })
 
@@ -412,6 +447,8 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
     if (tier === undefined) return
 
     game.mine(world, tier, cfg())
+    // 挖矿落盘：材料与经验是硬通货，绝不随进程蒸发
+    void persistWorld(sessionId, world)
   })
 
   // ── 会话结束：清理该会话的文件重生点备份（独立存档，随会话消亡）────────
@@ -425,10 +462,17 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
   ctx.provide('survivalEngine', {
     status: (sessionId: string) => game.formatStatus(worldFor(sessionId), cfg()),
     hud: (sessionId: string) => game.formatHud(worldFor(sessionId), cfg()),
-    eat: (sessionId: string, food: string) => game.eat(worldFor(sessionId), food, cfg()),
+    eat: (sessionId: string, food: string) => {
+      const world = worldFor(sessionId)
+      const outcome = game.eat(world, food, cfg())
+      if (outcome.ok) void persistWorld(sessionId, world)
+      return outcome
+    },
     craft: (sessionId: string, recipe: string) => {
       const world = worldFor(sessionId)
-      return game.craft(world, recipe, cfg())
+      const outcome = game.craft(world, recipe, cfg())
+      if (outcome.ok) void persistWorld(sessionId, world)
+      return outcome
     },
     sleep: async (sessionId: string) => {
       const world = worldFor(sessionId)
@@ -438,13 +482,14 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
         : (world.items.bed ?? 0) > 0
           ? game.rest(world, cfg())
           : game.sleep(world, cfg()) // 无床：复用"你没有床"的错误
-      // 设置重生点：备份工作区文件 + 导出对话摘要（await 完成再返回，保证立即可回退）
+      // 设置重生点：备份工作区文件 + 对话摘要 + 世界状态（await 完成再返回，保证立即可回退）
       if (outcome.ok) {
         const meta = metaOf(sessionId)
         if (meta.topLevel && meta.cwd !== undefined && meta.cwd.length > 0) {
           const session = agents?.get(sessionId)?.session as any
-          outcome.message += ` ${await backupRespawn(sessionId, meta.cwd as string, session)}`
+          outcome.message += ` ${await backupRespawn(sessionId, meta.cwd as string, world, session)}`
         }
+        void persistWorld(sessionId, world)
       }
       return outcome
     },

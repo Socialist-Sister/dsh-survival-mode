@@ -18,10 +18,13 @@
  */
 
 import { mkdir, readFile, readdir, rm, writeFile, copyFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 
 /** 快照目录里的对话摘要文件名（与 manifest.json 同级，不属于工作区）。 */
 export const CONVERSATION_FILE = 'conversation.md'
+/** 快照目录里的世界状态文件名（同一会话重启后恢复进度用）。 */
+export const WORLD_FILE = 'world.json'
 
 /** 默认排除的目录名（任意深度按 basename 匹配）：全部是可再生生成物。 */
 export const DEFAULT_EXCLUDES: string[] = [
@@ -167,6 +170,7 @@ export async function removeSnapshot(backupDir: string): Promise<void> {
 /**
  * 把对话摘要写入快照目录（conversation.md）。重生点 = 文件 + 对话一起存档；
  * 该文件不属于工作区，死亡回退时不会被删除——随快照保留到会话结束。
+ * 注意：snapshotWorkspace 会先清空备份目录，本函数必须在快照之后调用。
  */
 export async function saveConversation(backupDir: string, markdown: string): Promise<boolean> {
   try {
@@ -175,6 +179,32 @@ export async function saveConversation(backupDir: string, markdown: string): Pro
     return true
   } catch {
     return false
+  }
+}
+
+/**
+ * 把世界状态写入快照目录（world.json）：同一会话重启后恢复进度用。
+ * 独立存档语义不变——新会话仍从零开始，存档跟随会话 id 走。
+ * 同样必须在 snapshotWorkspace 之后调用。
+ */
+export async function saveWorld<T>(backupDir: string, data: T): Promise<boolean> {
+  try {
+    await mkdir(backupDir, { recursive: true })
+    await writeFile(join(backupDir, WORLD_FILE), JSON.stringify(data), 'utf8')
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** 同步读取 world.json（小文件，session-start 时一次性加载）；缺失/损坏返回 undefined。 */
+export function loadWorldSync<T>(backupDir: string): T | undefined {
+  try {
+    const raw = readFileSync(join(backupDir, WORLD_FILE), 'utf8')
+    const parsed = JSON.parse(raw) as T
+    return parsed ?? undefined
+  } catch {
+    return undefined
   }
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "@dsh-survival/engine",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "Survival-mode rules engine: hunger/hp/day-night/mob settlement, tool gates, mining drops, per-session independent saves with file respawn points (workspace snapshot/rollback on death), and the dsh-survival settings namespace",
   "license": "MIT",
   "type": "module",

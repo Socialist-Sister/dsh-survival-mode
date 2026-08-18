@@ -22,7 +22,7 @@ Minecraft survival rules × real coding work — an entertainment-focused agent 
 
 Every rule is **hard-settled by the engine** (not prompt theater), every game concept maps to vanilla Minecraft survival, and every plugin mechanism follows the official preset spec (same architecture as the dsh-collaboration suite).
 
-**Suite version 0.1.2**: engine 0.15.0 · tool-survival 0.6.2 · hud 0.1.3 · [Installation guide](docs/installation.md) · [GitHub Releases](https://github.com/Socialist-Sister/dsh-survival-mode/releases)
+**Suite version 0.1.3**: engine 0.16.0 · tool-survival 0.6.2 · hud 0.1.3 · [Installation guide](docs/installation.md) · [GitHub Releases](https://github.com/Socialist-Sister/dsh-survival-mode/releases)
 
 **Highlights**
 
@@ -348,14 +348,14 @@ dsh-survival:
 
 ## Saves & Persistence
 
-Every session is an **independent save** — world state is session memory and never crosses sessions:
+Every session is an **independent save**: world state is persisted per session (`world.json`) and a resumed session **restores its full progress after a restart**; nothing crosses sessions — a new session starts fresh:
 
 | Data | Lifetime |
 |---|---|
-| World day, XP, deaths, advancements, respawn point (bed), inventory | **Session memory — independent save**: no cross-session state; a new session starts at day 1, 0 XP, empty backpack |
-| File respawn point (workspace snapshot + conversation digest) | Snapshotted at session start (spawn point), refreshed on every sleep or day rest (respawn point); stored in `${DSH_HOME}/survival-respawns/<session-id>/` (includes `conversation.md`), removed when the session ends |
+| World day, XP, deaths, advancements, respawn point (bed), inventory, HP & hunger | **Persisted per session** (`world.json`, same dir as the file respawn point): written after every settlement/mining/crafting/eating/sleeping; resuming the same session after a restart restores it fully; a new session starts at day 1, 0 XP, empty backpack |
+| File respawn point (workspace snapshot + conversation digest + world state) | Snapshotted at session start (spawn point), refreshed on every sleep or day rest (respawn point); stored in `${DSH_HOME}/survival-respawns/<session-id>/` (includes `conversation.md` and `world.json`), removed when the session ends |
 | Death rollback | On death the workspace is restored to the latest snapshot: files created after it are deleted, modified files reverted, deleted files restored; excluded dirs (node_modules etc.) are untouched |
-| Death info (cause and drops) | Shown in-session (death screen), gone with the session |
+| Death info (cause and drops) | Persisted in `world.json` — a dead session stays dead after a restart (no resurrection); start a new session instead |
 
 ---
 

@@ -1,7 +1,7 @@
 {
   "name": "dsh-survival-mode",
   "private": true,
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "DeepSeek Harness 生存模式：Minecraft 生存规则 × 真实编码工作的娱乐性 Agent 预设套件",
   "license": "MIT",
   "packageManager": "pnpm@9.15.0",

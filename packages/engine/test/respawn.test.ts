@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { snapshotWorkspace, restoreWorkspace, removeSnapshot, saveConversation, DEFAULT_EXCLUDES } from '../src/respawn.ts'
+import { snapshotWorkspace, restoreWorkspace, removeSnapshot, saveConversation, saveWorld, loadWorldSync, DEFAULT_EXCLUDES } from '../src/respawn.ts'
 
 /** 建一个临时"工作区 + 备份目录"。 */
 async function makeDirs() {
@@ -164,6 +164,28 @@ test('防护：备份目录位于工作区内时拒绝快照与回退', async ()
     assert.equal(await readFile(join(cwd, 'a.txt'), 'utf8'), 'v1', '工作区未被破坏')
   } finally {
     await rm(join(cwd, '..'), { recursive: true, force: true })
+  }
+})
+
+test('saveWorld/loadWorldSync：世界状态往返；缺失与损坏返回 undefined', async () => {
+  const { backup } = await makeDirs()
+  try {
+    await mkdir(backup, { recursive: true })
+    assert.equal(loadWorldSync(backup), undefined, '无 world.json 时 undefined')
+    await writeFile(join(backup, 'world.json'), '{broken json', 'utf8')
+    assert.equal(loadWorldSync(backup), undefined, '损坏 JSON 时 undefined')
+
+    const world = { hp: 13, hunger: 7, xp: 42, day: 3, items: { bread: 2 }, materials: { iron: 5 }, dead: false }
+    assert.equal(await saveWorld(backup, world), true)
+    const loaded = loadWorldSync<typeof world>(backup)
+    assert.ok(loaded !== undefined)
+    assert.equal(loaded.hp, 13)
+    assert.equal(loaded.xp, 42)
+    assert.equal(loaded.day, 3)
+    assert.deepEqual(loaded.items, { bread: 2 })
+    assert.deepEqual(loaded.materials, { iron: 5 })
+  } finally {
+    await rm(join(backup, '..'), { recursive: true, force: true })
   }
 })
 
