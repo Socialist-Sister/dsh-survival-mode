@@ -22,7 +22,7 @@ Minecraft survival rules × real coding work — an entertainment-focused agent 
 
 Every rule is **hard-settled by the engine** (not prompt theater), every game concept maps to vanilla Minecraft survival, and every plugin mechanism follows the official preset spec (same architecture as the dsh-collaboration suite).
 
-**Suite version 0.1.0**: engine 0.14.0 · tool-survival 0.6.1 · hud 0.1.3 · [Installation guide](docs/installation.md) · [GitHub Releases](https://github.com/Socialist-Sister/dsh-survival-mode/releases)
+**Suite version 0.1.1**: engine 0.14.0 · tool-survival 0.6.1 · hud 0.1.3 · [Installation guide](docs/installation.md) · [GitHub Releases](https://github.com/Socialist-Sister/dsh-survival-mode/releases)
 
 **Highlights**
 
