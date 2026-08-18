@@ -34,7 +34,7 @@ export function apply(ctx: any) {
     defineTool({
       name: 'survival_status',
       description:
-        '查看生存模式完整状态：生命与饥饿、世界天数与昼夜、背包材料、物品栏、工具门禁（subagent/web_search/workflow 分别需要什么物品）、进度与完整配方书。接到任务或状态不明时先看这里。',
+        '查看生存模式完整状态：生命与饥饿、世界天数与昼夜、背包材料、物品栏、文件重生点（出生点/重生点）、工具门禁（subagent/web_search/workflow 分别需要什么物品）、进度与完整配方书。接到任务或状态不明时先看这里。',
       parameters: {},
       output: {
         schema: { type: 'string' },
@@ -106,7 +106,7 @@ export function apply(ctx: any) {
   ctx.tools.register(
     defineTool({
       name: 'survival_sleep',
-      description: '睡在床上：跳过夜晚（夜晚刷怪）并把床设置为重生点（死亡后床保留）。只能在夜晚且有床时使用（羊毛×3+木板×3 合成床）。',
+      description: '睡在床上：跳过夜晚（夜晚刷怪）并把床设置为重生点——死亡时工作区文件会回退到重生点备份（每次睡觉都会更新备份）。只能在夜晚且有床时使用（羊毛×3+木板×3 合成床）。',
       parameters: {},
       output: {
         schema: { type: 'string' },
@@ -117,7 +117,7 @@ export function apply(ctx: any) {
       async execute(_args: {}, exec: any) {
         const id = sessionIdOf(exec)
         if (id.length === 0) return '生存模式工具需要在一个会话中调用。'
-        return engine.sleep(id).message
+        return (await engine.sleep(id)).message
       },
       presentCall: () => ({ card: 'generic', title: '🛏️ 睡觉', kind: 'other', rawInput: {} }),
     }),

@@ -2,24 +2,29 @@
  * `@dsh-survival/engine`：生存模式的规则引擎插件行。
  *
  * 挂载位置：AGENT PRESET（survival 预设的 isolate realm 组），不触碰宿主
- * composition——引擎的服务消费者全部在预设内部，跨会话的玩家存档通过宿主
- * `storageDomain` 服务持久化（预设消费宿主服务，符合官方平面规则）。
+ * composition——引擎的服务消费者全部在预设内部。世界状态（生命/饥饿/天数/
+ * 经验/背包）是**会话内存态**：每个会话是一条独立的命、独立存档，不跨会话
+ * 持久化；新会话从第 1 天、0 经验、空背包开始。
+ *
+ * 文件重生点：会话开始时自动把工作区快照到 ${DSH_HOME}/survival-respawns/
+ * <sessionId>/（出生点）；每次睡觉覆盖快照（新重生点）；死亡时工作区回退到
+ * 最近一次快照（重生点之后的文件改动丢失）。只对顶层会话生效——子代理的
+ * 死亡不碰文件。
  *
  * 职责：
- *   - 注册 settings 命名空间 `dsh-survival`（难度/节奏/耐久，settings.yaml 可调）
+ *   - 注册 settings 命名空间 `dsh-survival`（难度/节奏/耐久/快照排除，settings.yaml 可调）
  *   - 提供 `survivalEngine` 服务（状态/合成/吃/睡/配方书，供工具包消费）
  *   - `tools/pre-execute` 作用域瀑布监听：死亡判定、工具门禁（铁镐/望远镜/
  *     红石中继器）、饥饿与昼夜结算、夜晚刷怪——全部硬结算
  *   - `tools/result` 观察：任务完成信号 → 挖矿掉落（原版矿石）+ 经验
- *   - `agent/session-start`：为会话建立世界（复活/继承存档）
+ *   - `agent/session-start`：为会话建立世界 + 出生点文件快照
  * @module @dsh-survival/engine
  */
+import { join } from 'node:path'
+import { homedir } from 'node:os'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
-import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
-import type { Domain, DomainFacility } from '@deepseek-ai/dsh-storage-domain'
-import { z as zod } from 'zod'
 // 事件表增强：tools/pre-execute 等来自 dsh-tools，agent/session-start 来自 dsh-agent，
 // session/event 来自 dsh-session
 import type {} from '@deepseek-ai/dsh-tools'
@@ -27,6 +32,7 @@ import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import * as game from './game'
+import { DEFAULT_EXCLUDES, backupRoot, removeSnapshot, restoreWorkspace, snapshotWorkspace } from './respawn'
 
 export const name = 'survival-engine'
 export const inject = [] as const
@@ -47,6 +53,8 @@ export interface SurvivalEngineConfig {
   diamondSwordDurability?: number | null
   shieldDurability?: number | null
   smallLootChance?: number | null
+  /** 文件快照排除的目录名（任意深度按 basename 匹配）；空数组 = 全量备份。 */
+  respawnExcludes?: string[] | null
 }
 
 export const Config: z<SurvivalEngineConfig> = z.object({
@@ -63,34 +71,11 @@ export const Config: z<SurvivalEngineConfig> = z.object({
   diamondSwordDurability: z.number().step(1).min(1),
   shieldDurability: z.number().step(1).min(1),
   smallLootChance: z.number().min(0).max(1),
+  respawnExcludes: z.array(z.string()),
 })
 
-/** 玩家存档的 storage domain（host `storageDomain` 服务）。名须匹配 /^[a-z][a-z0-9_]*$/。 */
-const SAVE_SPEC = defineDomain({
-  name: 'dsh_survival',
-  version: 1,
-  global: {
-    schema: zod.object({
-      xp: zod.number(),
-      day: zod.number(),
-      deaths: zod.number(),
-      respawnBed: zod.boolean(),
-      achievements: zod.array(zod.string()),
-    }),
-    initial: { xp: 0, day: 1, deaths: 0, respawnBed: false, achievements: [] },
-  },
-  tables: {
-    gravestones: domainTable(
-      zod.object({
-        day: zod.number(),
-        cause: zod.string(),
-        droppedItems: zod.array(zod.string()),
-        droppedXp: zod.number(),
-        at: zod.string(),
-      }),
-    ),
-  },
-})
+/** 每个会话独立存档：出生即全新世界（第 1 天 / 0 经验 / 无成就 / 无床）。 */
+const FRESH_STATS: game.WorldStats = { xp: 0, day: 1, deaths: 0, respawnBed: false, achievements: [] }
 
 /** 提供给 `@dsh-survival/tool-survival` 的服务接口。 */
 export interface SurvivalEngineService {
@@ -98,15 +83,45 @@ export interface SurvivalEngineService {
   hud(sessionId: string): string
   eat(sessionId: string, food: string): { ok: boolean; message: string }
   craft(sessionId: string, recipe: string): { ok: boolean; message: string }
-  sleep(sessionId: string): { ok: boolean; message: string }
+  sleep(sessionId: string): Promise<{ ok: boolean; message: string }>
   /** 浏览器状态栏（@dsh-survival/hud）读取的轻量快照。 */
   snapshot(sessionId: string): game.HudSnapshot
 }
 
-function sessionIdOf(exec: { agent?: { session?: { id: unknown }; id?: unknown } | null }): string {
+function sessionIdOf(exec: { agent?: { session?: { id?: unknown }; id?: unknown } | null }): string {
   const agent = exec.agent
   if (agent === undefined || agent === null) return ''
   return String(agent.session?.id ?? agent.id ?? '')
+}
+
+// ── 会话元信息（工作目录 / 是否顶层会话）──────────────────────────────────
+// 死亡回退需要知道玩家的工作目录与"这是不是玩家本人的会话"。这些信息只存在于
+// agent/session-start、tools/pre-execute、session/event 的 agent/session 对象上，
+// 服务调用（sleep）只拿得到 sessionId——所以先按会话记录，用到时再读。
+
+interface SessionMeta {
+  cwd?: string
+  topLevel: boolean
+}
+
+type AgentLike = {
+  session?: {
+    id?: unknown
+    header?: { cwd?: string; origin?: string; delegationDepth?: number }
+  } | null
+  id?: unknown
+}
+
+/** 顶层会话（玩家本人）——子代理是分身，其死亡不得回退文件。 */
+function isTopLevel(agent: AgentLike | null | undefined): boolean {
+  const header = agent?.session?.header
+  if (header === undefined) return true // 无 header 信息时按顶层处理（保守可回退）
+  return header.origin !== 'subagent' && (header.delegationDepth ?? 0) <= 0
+}
+
+/** 会话工作目录（与 dsh-tool-fs 的 sessionCwd 同一通路）。 */
+function cwdOf(agent: AgentLike | null | undefined): string | undefined {
+  return agent?.session?.header?.cwd
 }
 
 export async function apply(ctx: Context, config: SurvivalEngineConfig) {
@@ -146,43 +161,23 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
     }
     return merged
   }
-
-  // ── 存档：打开 storage domain（宿主服务，可选——缺席时内存态照常可玩）───
-  let domain: Domain<typeof SAVE_SPEC> | undefined
-  const facility = ctx.get('storageDomain') as DomainFacility | undefined
-  if (facility !== undefined) {
-    try {
-      domain = await facility.open(SAVE_SPEC)
-    } catch (error) {
-      ctx.logger?.warn?.(`dsh-survival: storage domain open failed (${String(error)}) — 存档不可用，仅内存态`)
-    }
-  }
-  ctx.effect(() => () => {
-    void domain?.close().catch(() => {})
-  })
-
-  const loadStats = (): game.WorldStats => {
-    if (domain === undefined) return { xp: 0, day: 1, deaths: 0, respawnBed: false, achievements: [] }
-    try {
-      return domain.global.get()
-    } catch {
-      return { xp: 0, day: 1, deaths: 0, respawnBed: false, achievements: [] }
-    }
+  /** 快照排除目录（settings 覆盖默认）。 */
+  const excludes = (): string[] => {
+    const value = source().respawnExcludes
+    return value === null || value === undefined ? DEFAULT_EXCLUDES : value
   }
 
-  const persistStats = async (world: game.World): Promise<void> => {
-    if (domain === undefined) return
-    try {
-      await domain.global.set({
-        xp: world.xp,
-        day: world.day,
-        deaths: world.deaths,
-        respawnBed: world.respawnBed,
-        achievements: [...world.achievements],
-      })
-    } catch {
-      /* 存档写失败不影响游戏进行 */
-    }
+  // ── 文件重生点：备份根目录（${DSH_HOME}/survival-respawns/）──────────────
+  const dshHome = process.env.DSH_HOME ?? join(homedir(), '.dsh')
+  const backupDirOf = (sessionId: string): string => join(backupRoot(dshHome), sessionId)
+
+  // 每个会话一条快照 promise 链：出生快照与睡觉快照串行执行，防竞争
+  const chains = new Map<string, Promise<unknown>>()
+  const chain = <T>(sessionId: string, task: () => Promise<T>): Promise<T> => {
+    const prev = chains.get(sessionId) ?? Promise.resolve()
+    const next = prev.then(task, task) as Promise<T>
+    chains.set(sessionId, next.catch(() => {}))
+    return next
   }
 
   // ── 跃迁播报：把状态变化推成一条插件来源的用户消息（玩家可见，不推进时间）
@@ -206,65 +201,74 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
 
   // ── 世界表：每个会话（玩家）一条命，子代理也各自结算 ────────────────────
   const worlds = new Map<string, game.World>()
+  const metas = new Map<string, SessionMeta>()
+
+  const remember = (agent: AgentLike | null | undefined): string => {
+    const id = String(agent?.session?.id ?? agent?.id ?? '')
+    if (id.length === 0) return ''
+    if (!metas.has(id)) {
+      metas.set(id, { cwd: cwdOf(agent), topLevel: isTopLevel(agent) })
+    }
+    return id
+  }
+
+  const metaOf = (sessionId: string): SessionMeta => metas.get(sessionId) ?? { topLevel: true }
 
   const worldFor = (sessionId: string): game.World => {
     let world = worlds.get(sessionId)
     if (world === undefined) {
-      world = game.createWorld(sessionId, loadStats())
+      world = game.createWorld(sessionId, FRESH_STATS)
       worlds.set(sessionId, world)
     }
     return world
   }
 
-  /** 死亡收尾：持久化掉落/墓碑；极限难度删档；向玩家播报死亡。 */
-  const kill = async (world: game.World, cause: string): Promise<void> => {
-    if (world.dead && world.death !== undefined) return
+  /** 死亡收尾：游戏结算 + 顶层会话的文件回退 + 向玩家播报死亡。 */
+  const kill = async (world: game.World, cause: string): Promise<string> => {
+    if (world.dead && world.death !== undefined) return ''
     game.die(world, cause)
     world.deaths += 1
-    if (cfg().difficulty === 'hardcore') {
-      try {
-        await domain?.global.set({ xp: 0, day: 1, deaths: 0, respawnBed: false, achievements: [] })
-      } catch {}
-      if (domain !== undefined) {
-        try {
-          for (const key of domain.table('gravestones').keys()) await domain.table('gravestones').delete(key)
-        } catch {}
+    // 文件回退（只对顶层会话；失败不阻断死亡结算，但如实播报）
+    let respawnNote = ''
+    const meta = metaOf(world.id)
+    if (meta.topLevel) {
+      const cwd = meta.cwd
+      if (cwd !== undefined && cwd.length > 0) {
+        const result = await chain(world.id, () => restoreWorkspace(cwd, backupDirOf(world.id), excludes()))
+        if (result.ok) {
+          respawnNote = `📁 文件已回退到${world.respawnBed ? '重生点' : '出生点'}：恢复 ${result.restored} 个文件，删除重生点之后新建的 ${result.deleted} 个文件。`
+        } else {
+          respawnNote = `⚠️ 文件回退失败：${result.error ?? '未知错误'}（游戏状态不受影响）。`
+        }
+      } else {
+        respawnNote = '⚠️ 本会话没有工作目录，文件无法回退。'
       }
-      notify(world.id, `☠️ ${world.death?.message ?? '你死了'}。极限模式：死亡即删档，世界已归零——写遗言吧。`)
-      return
-    }
-    try {
-      if (domain !== undefined) {
-        await domain.global.set({
-          xp: world.xp,
-          day: world.day,
-          deaths: world.deaths,
-          respawnBed: world.respawnBed,
-          achievements: [...world.achievements],
-        })
-        await domain.table('gravestones').put(`grave-${Date.now()}`, {
-          day: world.day,
-          cause: world.death?.message ?? '死因不明',
-          droppedItems: world.death?.dropped ?? [],
-          droppedXp: world.death?.droppedXp ?? 0,
-          at: new Date().toISOString(),
-        })
-      }
-    } catch {
-      /* 墓碑写失败不影响死亡判定 */
     }
     const dropped = world.death?.dropped.join('、') ?? '空手'
     notify(
       world.id,
-      `☠️ ${world.death?.message ?? '你死了'}。掉落：${dropped}；经验 −${world.death?.droppedXp ?? 0}。本会话已死亡——写下遗言吧；新会话将从重生点复活${world.respawnBed ? '，床还在等你' : ''}。`,
+      `☠️ ${world.death?.message ?? '你死了'}。掉落：${dropped}；经验 −${world.death?.droppedXp ?? 0}。${respawnNote}本会话已死亡——写下遗言吧；每个会话都是独立存档，新会话从第 1 天重新开始。`,
     )
+    return respawnNote
   }
 
-  // ── 会话开始：建立世界（复活点继承床，天数/经验/进度随存档延续）────────
+  // ── 会话开始：建立世界 + 出生点文件快照（独立存档）──────────────────────
   ctx.on('agent/session-start', (payload: any) => {
     try {
-      const id = String(payload?.agent?.session?.id ?? payload?.agent?.id ?? '')
-      if (id.length > 0) worldFor(id)
+      const agent = payload?.agent as AgentLike | undefined
+      const id = remember(agent)
+      if (id.length === 0) return
+      worldFor(id)
+      const meta = metaOf(id)
+      if (!meta.topLevel || meta.cwd === undefined || meta.cwd.length === 0) return
+      void chain(id, async () => {
+        const result = await snapshotWorkspace(meta.cwd as string, backupDirOf(id), excludes())
+        if (result.ok) {
+          notify(id, `📁 出生点已建立：工作区已备份（${result.files} 个文件）。死亡时文件将回退到此状态；睡过觉后重生点会更新为当前状态。`)
+        } else {
+          ctx.logger?.warn?.(`dsh-survival: 出生点快照失败 (${result.error ?? '未知'}) — 死亡时将无法回退文件`)
+        }
+      })
     } catch {
       /* 首次接触时惰性建世界兜底 */
     }
@@ -275,18 +279,17 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
     if (event?.type !== 'user/message') return
     // 只有真实用户消息算"对话回合"；引擎播报、插件消息等不推进时间
     if (event?.data?.source?.kind !== 'user') return
-    const sessionId = String(session?.id ?? '')
+    const sessionId = remember({ session })
     if (sessionId.length === 0) return
     const world = worlds.get(sessionId) ?? worldFor(sessionId)
     const outcome = game.onTurn(world, cfg())
     if (outcome.cause !== undefined) void kill(world, outcome.cause)
-    if (outcome.dayChanged === true) void persistStats(world)
     for (const notice of outcome.notices ?? []) notify(sessionId, notice)
   })
 
   // ── 工具门禁 + 生存结算（作用域过滤：只拦本预设的会话）──────────────────
   ctx.on('tools/pre-execute', async (exec: any, next: () => Promise<any>) => {
-    const sessionId = sessionIdOf(exec)
+    const sessionId = remember(exec.agent as AgentLike | undefined)
     if (sessionId.length === 0) return next()
     const world = worldFor(sessionId)
 
@@ -313,8 +316,8 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
     // 生存结算：饥饿 / 怪物（昼夜由对话回合驱动，见 session/event 监听）
     const outcome = game.settle(world, cfg(), exec.name)
     if (outcome.cause !== undefined) {
-      await kill(world, outcome.cause)
-      return { kind: 'deny', reason: game.deathDeny(world, cfg()) }
+      const respawnNote = await kill(world, outcome.cause)
+      return { kind: 'deny', reason: game.deathDeny(world, cfg()) + (respawnNote.length > 0 ? `\n${respawnNote}` : '') }
     }
     if (outcome.deny !== undefined) {
       return { kind: 'deny', reason: outcome.deny }
@@ -343,15 +346,13 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
     if (tier === undefined) return
 
     game.mine(world, tier, cfg())
-    // 每次挖矿都落盘：经验是硬通货，绝不允许随会话蒸发
-    void persistStats(world)
   })
 
-  // ── 会话结束：强制落盘（防止最后一次挖矿/进度没来得及写）──────────────
+  // ── 会话结束：清理该会话的文件重生点备份（独立存档，随会话消亡）────────
   ctx.on('session/disposed', (session: any) => {
     const id = String(session?.id ?? '')
-    const world = worlds.get(id)
-    if (world !== undefined) void persistStats(world)
+    if (id.length === 0) return
+    void removeSnapshot(backupDirOf(id)).catch(() => {})
   })
 
   // ── 服务 ──────────────────────────────────────────────────────────────────
@@ -361,14 +362,23 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
     eat: (sessionId: string, food: string) => game.eat(worldFor(sessionId), food, cfg()),
     craft: (sessionId: string, recipe: string) => {
       const world = worldFor(sessionId)
-      const outcome = game.craft(world, recipe, cfg())
-      if (outcome.ok) void persistStats(world)
-      return outcome
+      return game.craft(world, recipe, cfg())
     },
-    sleep: (sessionId: string) => {
+    sleep: async (sessionId: string) => {
       const world = worldFor(sessionId)
       const outcome = game.sleep(world, cfg())
-      if (outcome.ok) void persistStats(world)
+      // 新重生点：睡觉成功即覆盖文件备份（await 完成再返回，保证立即可回退）
+      if (outcome.ok) {
+        const meta = metaOf(sessionId)
+        if (meta.topLevel && meta.cwd !== undefined && meta.cwd.length > 0) {
+          const result = await chain(sessionId, () => snapshotWorkspace(meta.cwd as string, backupDirOf(sessionId), excludes()))
+          if (result.ok) {
+            outcome.message += ` 📁 重生点已更新：工作区备份 ${result.files} 个文件（死亡时文件将回退到此状态）。`
+          } else {
+            outcome.message += ` ⚠️ 重生点备份失败：${result.error ?? '未知错误'}（死亡时将回退到上一个备份）。`
+          }
+        }
+      }
       return outcome
     },
     snapshot: (sessionId: string) => game.snapshot(worldFor(sessionId), cfg()),

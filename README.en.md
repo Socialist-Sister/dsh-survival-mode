@@ -18,11 +18,11 @@ Minecraft survival rules × real coding work — an entertainment-focused agent 
 
 ---
 
-> You code, search, and ship in DeepSeek Harness as usual — while **living inside a Minecraft survival world**: every file write drains 1 hunger, working late at night spawns mobs, and without an iron pickaxe even `subagent` refuses to run. Eat when hungry, defend at night, and if you die your backpack drops and your XP halves — a new session respawns you at your bed.
+> You code, search, and ship in DeepSeek Harness as usual — while **living inside a Minecraft survival world**: every file write drains 1 hunger, working late at night spawns mobs, and without an iron pickaxe even `subagent` refuses to run. Eat when hungry, defend at night, and if you die your backpack drops, your XP halves, and your workspace files roll back to your respawn point — every session is an independent save.
 
 Every rule is **hard-settled by the engine** (not prompt theater), every game concept maps to vanilla Minecraft survival, and every plugin mechanism follows the official preset spec (same architecture as the dsh-collaboration suite).
 
-**Suite version 0.1.0**: engine 0.13.0 · tool-survival 0.6.0 · hud 0.1.3 · [Installation guide](docs/installation.md) · [GitHub Releases](https://github.com/Socialist-Sister/dsh-survival-mode/releases)
+**Suite version 0.1.0**: engine 0.14.0 · tool-survival 0.6.1 · hud 0.1.3 · [Installation guide](docs/installation.md) · [GitHub Releases](https://github.com/Socialist-Sister/dsh-survival-mode/releases)
 
 **Highlights**
 
@@ -30,7 +30,7 @@ Every rule is **hard-settled by the engine** (not prompt theater), every game co
 - 🧑‍🚀 **You are the player**: the agent is your avatar and executor — it reports status, obeys your orders, and can be told to self-manage in one sentence
 - ⛏️ **Work is mining**: writing files, completing goals, and exiting plan mode drop vanilla ores and XP
 - 🔒 **Real tool gates**: no iron pickaxe means no `subagent`; no spyglass means no `web_search` — like mining diamond without a pickaxe
-- 💾 **Persistent world saves**: days, XP, achievements, and gravestones persist across sessions; death drops your gear, a new session respawns you
+- 📁 **File respawn points**: the workspace is snapshotted at session start (spawn point) and updated every time you sleep (respawn point); death rolls files back — anything changed after the snapshot is lost; each session is an independent save with no cross-session state
 - 🖥️ **Browser status bar**: hearts + drumsticks + day/night + XP, visible only in survival-mode sessions (OpenMoji icons, no copyright concerns)
 
 This file is the complete manual: world rules, survival tools, crafting recipes, item usage, difficulty tiers, settings, save mechanics, the status bar, and troubleshooting.
@@ -67,9 +67,10 @@ This file is the complete manual: world rules, survival tools, crafting recipes,
 2. Start a new session and pick the 「生存模式」(Survival Mode) preset;
 3. Do real work as usual (coding, researching, writing docs) — the engine hard-settles your survival state in the background;
 4. A status bar appears above the input box: ❤️ HP (10 hearts = 20 HP), 🍗 hunger (10 drumsticks = 20 hunger), ☀️/🌙 day, ⭐ XP;
-5. Use `survival_status` for the full state and recipe book; finishing tasks drops materials, `survival_craft` crafts, `survival_eat` eats, `survival_sleep` sleeps.
+5. Use `survival_status` for the full state and recipe book; finishing tasks drops materials, `survival_craft` crafts, `survival_eat` eats, `survival_sleep` sleeps (and updates your file respawn point).
+6. Your workspace is backed up automatically at session start (spawn point); sleep to update it — death rolls your files back to the latest snapshot.
 
-**In one sentence**: work is mining, mining yields materials, materials craft items, items unlock abilities and defense; eat when hungry, defend at night, craft when you can afford it; die and respawn in a new session — the world goes on.
+**In one sentence**: work is mining, mining yields materials, materials craft items, items unlock abilities and defense; eat when hungry, defend at night, craft when you can afford it; die and your files roll back to your respawn point — a new session starts fresh.
 
 ---
 
@@ -92,7 +93,7 @@ The engine pushes a message only at the **moment a state changes** (no spam; re-
 | 🍖 Hunger ≤ 4 | Low-hunger warning + bread instructions |
 | ❤️ HP ≤ 4 | Critical-HP warning + healing conditions |
 | ⛏️🔭🔴 Unlock | Crafting the pickaxe/spyglass/repeater announces the unlocked ability |
-| ☠️ Death | Death message + drop list + respawn instructions |
+| ☠️ Death | Death message + drop list + file-rollback notice |
 
 Notices are plugin-sourced messages and **do not advance game time** (only real user messages count as dialogue turns).
 
@@ -139,7 +140,7 @@ Defense — see [items](#crafting--items): torches suppress spawns (chance ×0.8
 | `survival_status` | Full state: HP/hunger/XP, day & phase, materials, inventory, gate status, advancements, recent events, and the complete recipe book. **Look here first when unsure.** |
 | `survival_craft` | Craft by recipe. Parameter `recipe` takes a recipe id (e.g. `bread`, `iron-pickaxe`, `bed`) — see [the recipe book](#crafting--items). Failures tell you what's missing. |
 | `survival_eat` | Eat to restore hunger. Currently only bread (`food` defaults to `bread`), +8 hunger each. |
-| `survival_sleep` | Sleep: **only at night and only with a bed**. Skips the night, advances to the next day, and sets the bed as your respawn point (the bed survives death). |
+| `survival_sleep` | Sleep: **only at night and only with a bed**. Skips the night, advances to the next day, and sets the bed as your respawn point — every sleep updates the workspace backup to the current state (death rolls files back to the latest snapshot). |
 
 ---
 
@@ -163,7 +164,7 @@ Iron/copper ores must be smelted in a furnace before crafting; redstone, diamond
 | Earned | Mining drops (table above); sword counters +2/+3/+5 (stone/iron/diamond) |
 | **Spent** | **Anvil repair**: `repair-pickaxe` / `repair-stone-sword` / `repair-sword` / `repair-diamond-sword` / `repair-shield` — XP + materials (see [anvil & repair](#crafting--items)) |
 | Penalty | Halved (dropped) on death |
-| Persistence | XP carries across sessions via the world save |
+| Persistence | Session-scoped — every session is an independent save, a new session starts at 0 XP |
 
 > Enchanting is not implemented yet (kept out to avoid feature sprawl); anvil repair is the current XP sink — save up to fix tools, don't die with a full purse.
 
@@ -210,7 +211,7 @@ Iron/copper ores must be smelted in a furnace before crafting; redstone, diamond
 | `iron-sword` | iron sword | iron ×2 + stick ×1 | 60% night counter (+3 XP, durability 100; costs on every attempt) |
 | `diamond-sword` | diamond sword | diamond ×2 + stick ×1 | Sharper: 90% counter (+5 XP, durability 200; costs on every attempt); used **first** when lower-tier swords are also held |
 | `shield` | shield | planks ×6 + iron ×1 | 50% chance to block a hit (durability 120; every block attempt costs −1, blocked or not; cannot stop skeleton arrows) |
-| `bed` | bed | wool ×3 + planks ×3 | `survival_sleep` skips the night + sets respawn point (bed survives death) |
+| `bed` | bed | wool ×3 + planks ×3 | `survival_sleep` skips the night + sets respawn point (death rolls files back to the respawn snapshot; the bed itself never drops) |
 | `spyglass` | spyglass | amethyst ×1 + copper ×2 | Unlocks `web_search` (permanent, unbreakable like vanilla) |
 
 **Redstone**
@@ -258,12 +259,13 @@ Calls without the required item are denied with the recipe hint. `tool-ralph` do
 
 ---
 
-## Death & Respawning
+## Death, Respawning & File Rollback
 
-- **Death**: HP hits 0 → vanilla death message ("You were blown up by a Creeper!") → **your whole inventory and materials drop** (the bed stays) → **XP halved** → a gravestone is recorded.
+- **Death**: HP hits 0 → vanilla death message ("You were blown up by a Creeper!") → **your whole inventory and materials drop** (the bed stays) → **XP halved** → **file rollback**: the workspace is restored to the latest snapshot (respawn point, or spawn point if you never slept) — files created/modified/deleted after the snapshot are lost.
 - After death the session is over: every tool except survival tools is denied, the status bar shows ☠️ — write your last words, then close the session.
-- **Respawning**: starting a new survival session respawns you. World day, XP (already halved), and advancements persist; the bed (respawn point) is kept if you slept in one; your backpack starts empty.
-- **Hardcore**: death wipes the save — the world resets to zero.
+- **Independent saves**: every session is a separate life and save — day, XP, advancements, and inventory never carry across sessions. A new session starts at day 1, 0 XP, and an empty backpack.
+- **File respawn points**: the engine snapshots your workspace at session start into `${DSH_HOME}/survival-respawns/<session-id>/` (spawn point); every `survival_sleep` refreshes the backup (new respawn point). Death rolls back to the latest snapshot. Generated artifacts (`node_modules` / `.git` / `dist`, configurable) are excluded from both backup and rollback — reinstall/rebuild for a consistent tree. Subagent deaths never touch files.
+- **Hardcore**: same numbers as hard difficulty (spawn chance ×1.5, damage ×2) and death rolls files back the same way — with per-session saves there is no cross-session save to delete, so "death wipes the save" is gone.
 
 ---
 
@@ -277,7 +279,7 @@ Set via `dsh-survival.difficulty` in `settings.yaml`:
 | `easy` | Spawn chance ×0.5; mob damage halved (minimum 1) |
 | `normal` | Default rates and damage |
 | `hard` | Spawn chance ×1.5; mob damage ×2 |
-| `hardcore` | Same as hard + **death wipes the save** |
+| `hardcore` | Same as hard (with per-session saves there is no cross-session save to wipe — death rolls files back the same way) |
 
 > Note: like vanilla, **difficulty does not affect tool gates** — even in peaceful you still need an iron pickaxe for `subagent`.
 
@@ -285,7 +287,7 @@ Set via `dsh-survival.difficulty` in `settings.yaml`:
 
 ## Advancements
 
-Vanilla achievement names, kept forever in the world save:
+Vanilla achievement names, kept for the life of the session (each session is an independent save):
 
 | Advancement | Condition |
 |---|---|
@@ -315,6 +317,13 @@ dsh-survival:
   diamondSwordDurability: 200 # diamond sword pool (counters)
   shieldDurability: 120     # shield pool (blocks)
   smallLootChance: 0.7      # chance a file write triggers a small mine (0–1)
+  respawnExcludes:          # directory names excluded from file snapshots (basename match at any depth; [] = full backup)
+    - node_modules
+    - .git
+    - .pnpm-store
+    - dist
+    - test-dist
+    - __pycache__
 ```
 
 | Field | Meaning | Default |
@@ -332,16 +341,20 @@ dsh-survival:
 | `diamondSwordDurability` | Diamond sword pool | `200` |
 | `shieldDurability` | Shield pool | `120` |
 | `smallLootChance` | Chance a file write triggers a small mine | `0.7` |
+| `respawnExcludes` | Directory names excluded from file snapshots (basename match at any depth; `[]` = full backup) | `node_modules` `.git` `.pnpm-store` `dist` `test-dist` `__pycache__` |
 
 ---
 
 ## Saves & Persistence
 
+Every session is an **independent save** — world state is session memory and never crosses sessions:
+
 | Data | Lifetime |
 |---|---|
-| World day, XP, deaths, respawn point (bed), advancements | **Persist across sessions** (storage-domain save); written on every mining/crafting/sleep/death event and at session end — restart-proof |
-| HP, hunger, materials, inventory | Session memory — a new session (respawn) restores full HP/hunger and an empty backpack (the bed is kept if set) |
-| Gravestones (cause and drops of each death) | Persisted (cleared on hardcore death) |
+| World day, XP, deaths, advancements, respawn point (bed), inventory | **Session memory — independent save**: no cross-session state; a new session starts at day 1, 0 XP, empty backpack |
+| File respawn point (workspace snapshot) | Snapshotted at session start (spawn point), refreshed on every sleep (respawn point); stored in `${DSH_HOME}/survival-respawns/<session-id>/`, removed when the session ends |
+| Death rollback | On death the workspace is restored to the latest snapshot: files created after it are deleted, modified files reverted, deleted files restored; excluded dirs (node_modules etc.) are untouched |
+| Death info (cause and drops) | Shown in-session (death screen), gone with the session |
 
 ---
 
@@ -365,7 +378,7 @@ Icons are from OpenMoji (CC BY-SA 4.0) — one uniform icon family, identical si
 - **Opening line**: work first (file writes drop loot) → bread from wheat ×3 to stay alive → furnace from cobblestone ×8 → smelt iron → pickaxe unlocks `subagent`. Deep mines (goal completion) yield redstone and diamonds.
 - **Nightfall**: a torch (coal + stick) cuts spawns to ×0.8 but is **not immunity** — swords and shields are the hard defense; wool lets you craft a bed and skip nights entirely.
 - **Hunger management**: observation (read/grep) and chat (ask_user) are free — plan in conversation; eat before big batches of work.
-- **Death is not failure**: drops are recorded on your gravestone and the world continues; hardcore is another story.
+- **Death is not failure**: files roll back to your respawn point (sleep to save), world progress is per-session — every session is a fresh start.
 - **Don't waste turns**: the gates are real — stop retrying `web_search` before you have crafted a spyglass.
 
 ---
@@ -378,7 +391,7 @@ Icons are from OpenMoji (CC BY-SA 4.0) — one uniform icon family, identical si
 | Tool calls aren't being blocked | Make sure the session is actually on the survival preset (other presets are unaffected) |
 | Status bar missing | Confirm the `survival-hud` host row is in `cordis.patch.yml` and DSH was restarted; the bar only shows in survival sessions |
 | Day/night not advancing | Days advance by user messages (dialogue turns) — pure chat counts; check `dayLengthTurns` if you tuned it |
-| Save lost | The engine degrades to in-memory mode when the `storageDomain` backend is missing; confirm the official `storage-json`/`storage-domain` host rows exist |
+| Files not rolled back | Confirm the session has a readable working directory; snapshots live in `${DSH_HOME}/survival-respawns/` (removed when the session ends); excluded dirs (`respawnExcludes`) are neither backed up nor rolled back |
 
 ---
 
@@ -386,12 +399,12 @@ Icons are from OpenMoji (CC BY-SA 4.0) — one uniform icon family, identical si
 
 | Component | Plane | Role |
 |---|---|---|
-| `@dsh-survival/engine` | Agent preset (isolate realm) | Rules engine: hard settlement (`tools/pre-execute` gates/hunger/day-night/mobs), mining settlement (`tools/result`), saves, the `dsh-survival` settings namespace |
+| `@dsh-survival/engine` | Agent preset (isolate realm) | Rules engine: hard settlement (`tools/pre-execute` gates/hunger/day-night/mobs), mining settlement (`tools/result`), file respawn points (workspace snapshot/rollback), the `dsh-survival` settings namespace |
 | `@dsh-survival/tool-survival` | Agent preset (same realm) | `survival_status` / `survival_craft` / `survival_eat` / `survival_sleep` + the HUD system-prompt section |
 | `@dsh-survival/hud` | Host (cordis.patch.yml) | Status-bar bridge: a host-plane typert Remote reads the preset engine via `agentPresets.serviceFor`, gated to survival sessions by `capability` |
 | `config/agent-presets/survival` | Agent preset | Display name 「生存模式」; copied from standard, minus ralph (command blocks are creative-only) |
 
-The engine publishes the `survivalEngine` service with all consumers inside the preset; cross-session saves go through the host `storageDomain` service. The only host row is `@dsh-survival/hud` — a preset realm is invisible to the host, and browser RPC needs a host-side Remote (the same official pathway the api-proxy uses to read preset goals/skills).
+The engine publishes the `survivalEngine` service with all consumers inside the preset. World state is session memory (independent saves); file respawn points are handled by the engine with `node:fs`, snapshotting the workspace into `${DSH_HOME}/survival-respawns/` and rolling it back on death — top-level sessions only, subagent deaths never touch files. The only host row is `@dsh-survival/hud` — a preset realm is invisible to the host, and browser RPC needs a host-side Remote (the same official pathway the api-proxy uses to read preset goals/skills).
 
 ---
 
@@ -438,4 +451,4 @@ This is an independent entertainment project with plenty of room to grow — iss
 - **i18n**: the README and in-game text are currently Chinese-first
 - **Test coverage**: currently tested manually — automated tests welcome
 
-Feel free to fork and open PRs — bug fixes, tests, balance tuning, and new mechanics are all welcome. Before contributing, please respect the architecture conventions: engine and tools live in the preset's isolate realm (no service published into the root realm), the host side holds only the `@dsh-survival/hud` status-bar bridge, and cross-session saves go through the host `storageDomain` service.
+Feel free to fork and open PRs — bug fixes, tests, balance tuning, and new mechanics are all welcome. Before contributing, please respect the architecture conventions: engine and tools live in the preset's isolate realm (no service published into the root realm), the host side holds only the `@dsh-survival/hud` status-bar bridge; world state is session memory (independent saves) and file respawn points are handled by the engine directly via workspace snapshots.

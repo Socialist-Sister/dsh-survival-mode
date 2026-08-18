@@ -9,7 +9,9 @@
  *   - 昼夜 = 对话回合计数（用户消息推进，纯聊天也过天）；夜晚刷怪
  *     （僵尸/骷髅/苦力怕/蜘蛛）
  *   - 火把防刷怪、床跳过夜晚并设置重生点、盾牌格挡、铁剑反击
- *   - 死亡 = 原版死亡信息 + 掉落全部背包与半数经验；极限难度删档
+ *   - 死亡 = 原版死亡信息 + 掉落全部背包与半数经验；会话随即终结
+ *   - 每个会话独立存档：世界状态不跨会话，新会话从第 1 天重新开始；
+ *     文件重生点（工作区快照/回退）由引擎在 respawn.ts 层实现
  *   - 进度（成就）用原版名称：钻石！/ 铁器时代 / 甜甜的梦 / 怪猎手
  * @module @dsh-survival/engine/game
  */
@@ -231,7 +233,7 @@ export const ACHIEVEMENTS: Record<string, { name: string; desc: string }> = {
 
 // ── 世界状态 ────────────────────────────────────────────────────────────────
 
-/** 跨会话持久化的玩家存档（storage domain global）。 */
+/** 世界初始统计（v0.14 起引擎总是传默认值——每个会话独立存档，不再跨会话持久化）。 */
 export interface WorldStats {
   xp: number
   day: number
@@ -691,10 +693,9 @@ export function die(world: World, cause: string): DeathInfo {
 export function deathDeny(world: World, cfg: SurvivalConfig): string {
   const dropped = world.death?.dropped.join('、') ?? '空手'
   const base = `☠️ 你死了——${world.death?.message ?? '你死了！'}。背包与半数经验已掉落（掉落：${dropped}；经验 -${world.death?.droppedXp ?? 0}）。本会话已死亡：请在回复中写下你的遗言，然后停止工作。`
-  if (cfg.difficulty === 'hardcore') {
-    return `${base}（极限模式：死亡即删档，世界已归零。）`
-  }
-  return `${base}（新会话将从重生点复活——世界天数、经验与进度保留${world.respawnBed ? '，你的床还在重生点等你' : ''}。）`
+  // 文件回退结果由引擎在 deny reason 中追加（respawnNote）；这里只说明存档规则。
+  void cfg
+  return `${base}（每个会话都是独立存档：新会话从第 1 天、0 经验、空背包重新开始。）`
 }
 
 // ── 生存动作：吃 / 合成 / 睡觉 ─────────────────────────────────────────────
@@ -779,7 +780,7 @@ export function sleep(world: World, cfg: SurvivalConfig): { ok: boolean; message
   world.respawnBed = true
   const first = unlockAchievement(world, 'sweet-dreams')
   pushLog(world, `🛏️ 你在床上睡了一觉，跳过夜晚——现在是第 ${world.day} 天。${first ? '（甜甜的梦！）' : ''}`)
-  return { ok: true, message: `🛏️ 睡觉成功，一觉到第 ${world.day} 天。床已设置为重生点：死亡后床会保留。` }
+  return { ok: true, message: `🛏️ 睡觉成功，一觉到第 ${world.day} 天。床已设置为重生点：死亡时工作区文件将回退到此状态（床不掉落）。` }
 }
 
 // ── 展示 ────────────────────────────────────────────────────────────────────
@@ -852,7 +853,7 @@ function itemsLine(world: World): string {
 
 export function formatHud(world: World, cfg: SurvivalConfig): string {
   if (world.dead) {
-    return `☠️ 你已死亡——${world.death?.message ?? ''}（新会话从重生点复活）`
+    return `☠️ 你已死亡——${world.death?.message ?? ''}（本会话终结；每个会话独立存档，新会话从第 1 天开始）`
   }
   const lines = [
     `⛏️ 生存模式 · ${cfg.difficulty} · 第 ${world.day} 天 · ${phaseLine(world, cfg)}`,
@@ -869,10 +870,9 @@ export function formatStatus(world: World, cfg: SurvivalConfig): string {
       '── ☠️ 死亡界面 ──',
       `死亡信息：${world.death?.message ?? '你死了'}`,
       `掉落物品：${world.death?.dropped.join('、') ?? '空手'}；经验 -${world.death?.droppedXp ?? 0}`,
-      `墓志铭：你在第 ${world.day} 天离开了这个世界（累计死亡 ${world.deaths + 1} 次）。`,
-      cfg.difficulty === 'hardcore'
-        ? '极限模式：死亡即删档。'
-        : '复活方式：开启新会话——世界天数、经验与进度保留，背包从零开始。',
+      `墓志铭：你在第 ${world.day} 天离开了这个世界。`,
+      '文件：工作区已回退到最近一次备份（重生点或出生点）；重生点之后的文件改动已丢失。',
+      '复活方式：开启新会话——每个会话都是独立存档（第 1 天 / 0 经验 / 空背包）。',
     ].join('\n')
   }
   const gated = Object.entries(GATES).map(([tool, gate]) => {
@@ -893,6 +893,7 @@ export function formatStatus(world: World, cfg: SurvivalConfig): string {
     `${hearts(world)} (${world.hp}/20) · ${hungerBar(world)} (${world.hunger}/20) · ⭐ 经验 ${world.xp}`,
     `背包材料：${materialsLine(world)}`,
     `物品栏：${itemsLine(world)}`,
+    `文件重生点：${world.respawnBed ? '重生点（睡过觉——死亡回退到最近备份）' : '出生点（会话开始时的备份——死亡回退到此）'}`,
     `工具门禁：${gated.join(' · ')}`,
     `进度：${unlocked}`,
     ...(isNight(world, cfg) && world.nightEncounters > 0

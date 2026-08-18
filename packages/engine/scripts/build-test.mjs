@@ -27,16 +27,23 @@ if (esbuild === undefined) {
 rmSync('test-dist', { recursive: true, force: true })
 mkdirSync('test-dist', { recursive: true })
 
-await esbuild.build({
-  entryPoints: ['test/game.test.ts'],
-  bundle: true,
-  format: 'esm',
-  platform: 'node',
-  target: 'node20',
-  loader: { '.ts': 'ts' },
-  resolveExtensions: ['.ts', '.js', '.mjs'],
-  outfile: 'test-dist/game.test.mjs',
-  sourcemap: false,
-  logLevel: 'error',
-})
-console.log('test-dist/game.test.mjs 转译完成')
+const entries = [
+  { in: 'test/game.test.ts', out: 'test-dist/game.test.mjs' },
+  { in: 'test/respawn.test.ts', out: 'test-dist/respawn.test.mjs' },
+]
+
+for (const { in: input, out } of entries) {
+  await esbuild.build({
+    entryPoints: [input],
+    bundle: true,
+    format: 'esm',
+    platform: 'node',
+    target: 'node20',
+    loader: { '.ts': 'ts' },
+    resolveExtensions: ['.ts', '.js', '.mjs'],
+    outfile: out,
+    sourcemap: false,
+    logLevel: 'error',
+  })
+  console.log(`${out} 转译完成`)
+}

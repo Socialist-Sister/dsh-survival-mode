@@ -370,13 +370,18 @@ test('die：掉落全部背包与材料，经验减半，床保留', () => {
   assert.ok(death.dropped.length >= 3, '掉落清单含多个条目')
 })
 
-test('deathDeny：普通难度提示重生，hardcore 提示删档', () => {
+test('deathDeny：独立存档提示；hardcore 与普通一致（不再删档）', () => {
   const { cfg, world } = freshWorld()
   die(world, '被僵尸杀死了')
-  assert.match(deathDeny(world, cfg), /新会话将从重生点复活/)
+  const deny = deathDeny(world, cfg)
+  assert.match(deny, /独立存档/)
+  assert.match(deny, /新会话从第 1 天/)
+  assert.doesNotMatch(deny, /删档/)
   const w2 = freshWorld({ difficulty: 'hardcore' }).world
   die(w2, '被僵尸杀死了')
-  assert.match(deathDeny(w2, { ...cfg, difficulty: 'hardcore' }), /删档/)
+  const denyHard = deathDeny(w2, { ...cfg, difficulty: 'hardcore' })
+  assert.match(denyHard, /独立存档/)
+  assert.doesNotMatch(denyHard, /删档/)
 })
 
 test('成就表：4 项原版成就', () => {

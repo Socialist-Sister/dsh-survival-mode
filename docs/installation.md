@@ -1,6 +1,6 @@
 # 安装指南（Windows / Linux / macOS）
 
-`dsh-survival` 生存模式套件：引擎与工具都在「生存模式」预设内部（isolate realm），跨会话存档消费宿主 `storageDomain` 服务；唯一的宿主行是 `@dsh-survival/hud` 状态栏桥（浏览器 RPC 需要宿主侧 Remote，用 `agentPresets.serviceFor` 读预设引擎——`capability` 门禁保证状态栏**只在生存模式显示**）。
+`dsh-survival` 生存模式套件：引擎与工具都在「生存模式」预设内部（isolate realm）。世界状态是会话内存态（独立存档），文件重生点由引擎用 `node:fs` 快照/回退工作区到 `${DSH_HOME}/survival-respawns/`；唯一的宿主行是 `@dsh-survival/hud` 状态栏桥（浏览器 RPC 需要宿主侧 Remote，用 `agentPresets.serviceFor` 读预设引擎——`capability` 门禁保证状态栏**只在生存模式显示**）。
 
 | 组件 | 平面 | 安装位置 |
 |---|---|---|
@@ -14,7 +14,7 @@
 
 - DeepSeek Harness 已安装并可启动（本套件基于 `@deepseek-ai/dsh-*` 0.1.0-rc 系列 API）
 - Node.js ≥ 20，pnpm ≥ 9
-- 部署为官方 standard / cordis 等预设提供的标准宿主（`storageDomain` / `settings` / `typert` / `agentPresets` 服务，官方 base + web-app 已含）
+- 部署为官方 standard / cordis 等预设提供的标准宿主（`settings` / `typert` / `agentPresets` 服务，官方 base + web-app 已含）
 
 ## 路径约定（三端对照）
 
@@ -162,8 +162,8 @@ cd ~/.dsh/profiles/web && node -e "console.log(require.resolve('@dsh-survival/en
 | 症状 | 处理 |
 |---|---|
 | 预设挂载报「Cannot find package」 | 包未装进 profile 可解析位置：确认第 2 步的 `pnpm add -w` 成功（或开发模式的符号链接已建且指向含 `lib/` 的包目录） |
-| 预设挂载报行未激活 | 确认部署宿主含 `storageDomain`/`settings`（官方 base + web-app 已含）；引擎对这些服务是可选消费，不会因此卡住 |
+| 预设挂载报行未激活 | 确认部署宿主含 `settings`（官方 base + web-app 已含）；引擎对它是可选消费，不会因此卡住 |
 | 工具调用没被拦截 | 确认会话确实挂在「生存模式」预设上（其他预设不受影响） |
 | 状态栏不显示 | 确认第 3 步的 `survival-hud` 宿主行已插入且已重启；状态栏只在「生存模式」会话显示 |
-| 存档丢失 | `storageDomain` 后端未挂载时引擎降级为内存态；确认官方 `storage-json`/`storage-domain` 宿主行存在 |
+| 文件没有回退 | 确认会话有工作目录且可读；快照在 `${DSH_HOME}/survival-respawns/`（会话结束会清理）；排除目录（`respawnExcludes`）不备份也不回退 |
 | `dsh plugin` 报 `ERR_PNPM_ADDING_TO_ROOT` | 用 `cd <profile>` + `pnpm add -w <tgz>...` 手工安装（见第 2 步） |
