@@ -22,6 +22,7 @@
  */
 import { join } from 'node:path'
 import { homedir } from 'node:os'
+import { access } from 'node:fs/promises'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
@@ -32,7 +33,7 @@ import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import * as game from './game'
-import { CONVERSATION_FILE, DEFAULT_EXCLUDES, backupRoot, loadWorldSync, removeSnapshot, restoreWorkspace, saveConversation, saveWorld, snapshotWorkspace } from './respawn'
+import { CONVERSATION_FILE, DEFAULT_EXCLUDES, backupRoot, loadRespawnStateSync, loadWorldSync, removeSnapshot, restoreWorkspace, saveConversation, saveRespawnState, saveWorld, snapshotWorkspace } from './respawn'
 
 export const name = 'survival-engine'
 export const inject = [] as const
@@ -84,6 +85,8 @@ export interface SurvivalEngineService {
   eat(sessionId: string, food: string): { ok: boolean; message: string }
   craft(sessionId: string, recipe: string): { ok: boolean; message: string }
   sleep(sessionId: string): Promise<{ ok: boolean; message: string }>
+  /** 查看（不传 value）或修改（传难度值）本会话难度，不影响其他会话。 */
+  difficulty(sessionId: string, value?: string): string
   /** 浏览器状态栏（@dsh-survival/hud）读取的轻量快照。 */
   snapshot(sessionId: string): game.HudSnapshot
 }
@@ -160,6 +163,12 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
       }
     }
     return merged
+  }
+  /** 会话级配置：难度允许按会话覆盖（survival_difficulty），其余字段取全局。 */
+  const cfgFor = (world: game.World): game.SurvivalConfig => {
+    const base = cfg()
+    if (world.difficulty === undefined || world.difficulty === base.difficulty) return base
+    return { ...base, difficulty: world.difficulty }
   }
   /** 快照排除目录（settings 覆盖默认）。 */
   const excludes = (): string[] => {
@@ -304,19 +313,26 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
       if (snap.ok) {
         await saveConversation(backupDir, conversationMarkdown(session))
         await saveWorld(backupDir, world)
+        await saveRespawnState(backupDir, game.respawnSnapshotOf(world))
       }
       return snap
     })
     if (result.ok) {
-      return `📁 重生点已更新：工作区备份 ${result.files} 个文件 + 对话摘要（${CONVERSATION_FILE}）+ 世界状态（world.json）。死亡时文件将回退到此状态，重启也会恢复进度。`
+      return `📁 重生点已更新：工作区备份 ${result.files} 个文件 + 对话摘要（${CONVERSATION_FILE}）+ 世界状态（world.json）+ 重生点状态（respawn.json）。死亡时文件与状态将回退到此，重启也会恢复进度。`
     }
     return `⚠️ 重生点备份失败：${result.error ?? '未知错误'}（死亡时将回退到上一个备份）。`
   }
 
-  /** 死亡收尾：游戏结算 + 顶层会话的文件回退 + 向玩家播报死亡。 */
+  /**
+   * 死亡收尾：
+   * - hardcore：删档（die → 遗言 → 会话终结，新会话是全新世界）
+   * - 其他难度：软回退——文件回退到最近备份 + 世界状态恢复到重生点时刻
+   *   （生命/饱食/时间/经验/背包），成就保留，会话继续。
+   */
   const kill = async (world: game.World, cause: string): Promise<string> => {
     if (world.dead && world.death !== undefined) return ''
-    game.die(world, cause)
+    const hardcore = cfgFor(world).difficulty === 'hardcore'
+    if (hardcore) game.die(world, cause)
     world.deaths += 1
     // 文件回退（只对顶层会话；失败不阻断死亡结算，但如实播报）
     let respawnNote = ''
@@ -334,40 +350,169 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
         respawnNote = '⚠️ 本会话没有工作目录，文件无法回退。'
       }
     }
-    const dropped = world.death?.dropped.join('、') ?? '空手'
-    // 死亡状态落盘（重启后恢复的会话仍是死亡状态，不会"复活"）
+    if (hardcore) {
+      const dropped = world.death?.dropped.join('、') ?? '空手'
+      // 死亡状态落盘（重启后恢复的会话仍是死亡状态，不会"复活"）
+      await persistWorld(world.id, world)
+      notify(
+        world.id,
+        `☠️ ${world.death?.message ?? '你死了'}。掉落：${dropped}；经验 −${world.death?.droppedXp ?? 0}。${respawnNote}（极限模式：死亡即删档）本会话已死亡——写下遗言吧；新会话是全新世界，从第 1 天重新开始。`,
+        true,
+      )
+      return respawnNote
+    }
+    // ── 软回退：状态恢复到重生点时刻（respawn.json），会话继续 ──────────
+    const snapshot = loadRespawnStateSync<game.RespawnSnapshot>(backupDirOf(world.id))
+    if (snapshot !== undefined) {
+      // 丢失清单（回退前对比）：重生点之后获得的物品/材料/经验
+      const lost: string[] = []
+      for (const [id, amount] of Object.entries(world.items) as [game.ItemId, number][]) {
+        const snap = snapshot.items?.[id] ?? 0
+        if (amount > snap) lost.push(`${game.ITEM_LABELS[id]}×${amount - snap}`)
+      }
+      for (const [id, amount] of Object.entries(world.materials) as [game.MaterialId, number][]) {
+        const snap = snapshot.materials?.[id] ?? 0
+        if (amount > snap) lost.push(`${game.MATERIAL_LABELS[id]}×${amount - snap}`)
+      }
+      const lostXp = Math.max(0, world.xp - snapshot.xp)
+      game.revive(world, snapshot)
+      const lostLine = lost.length > 0 ? `，丢失：${lost.join('、')}` : ''
+      const xpLine = lostXp > 0 ? `、经验 ${lostXp}` : ''
+      respawnNote += ` 💫 状态已回退到重生点：生命/饱食/时间/经验/背包恢复${lostLine}${xpLine}（成就保留）。`
+    } else {
+      respawnNote += ' ⚠️ 没有重生点状态（respawn.json）——状态无法回退，仅文件回退。'
+    }
     await persistWorld(world.id, world)
-    notify(
-      world.id,
-      `☠️ ${world.death?.message ?? '你死了'}。掉落：${dropped}；经验 −${world.death?.droppedXp ?? 0}。${respawnNote}本会话已死亡——写下遗言吧；每个会话都是独立存档，新会话从第 1 天重新开始。`,
-      true,
-    )
+    notify(world.id, `☠️ 你${cause}！${respawnNote}继续冒险吧——重生点之后的进展已丢失，但世界还在。`, true)
     return respawnNote
   }
 
-  // ── 会话开始：建立世界（含重启恢复）+ 出生点快照（文件 + 对话 + 世界）──
+  /**
+   * 开局难度询问：新会话（未设置过会话难度）启动时弹出 GUI 问题，
+   * 让玩家直接选择本会话难度；无 UI provider / 未作答时静默回退全局难度。
+   */
+  /**
+   * 开局难度询问：新会话（未设置过会话难度）启动时弹出 GUI 问题，
+   * 让玩家直接选择本会话难度；无 UI provider / 未作答时静默回退全局难度。
+   * agent 必须传 live 实例——web provider 要求 agent-owned session（ASK_MISSING_AGENT）。
+   */
+  const askDifficulty = async (sessionId: string, world: game.World, agent: unknown): Promise<void> => {
+    try {
+      const questions = ctx.get('userQuestions') as
+        | {
+            ask(request: {
+              agent?: unknown
+              questions: {
+                id: string
+                header?: string
+                question: string
+                detail?: string
+                options?: { label: string; description?: string }[]
+              }[]
+            }): Promise<{ answers: { id: string; selected: string[] }[] }>
+          }
+        | undefined
+      if (questions === undefined) {
+        ctx.logger?.info?.(`dsh-survival: userQuestions 服务不可用，跳过开局难度询问（会话 ${sessionId}）`)
+        return
+      }
+      const labels: Record<string, string> = {
+        peaceful: 'peaceful 和平',
+        easy: 'easy 简单',
+        normal: 'normal 普通',
+        hard: 'hard 困难',
+        hardcore: 'hardcore 极限',
+      }
+      const answer = await questions.ask({
+        agent,
+        questions: [
+          {
+            id: 'difficulty',
+            header: '🎚️ 选择本会话难度',
+            question: '这个会话用哪个难度？',
+            options: [
+              { label: 'peaceful', description: '和平：不刷怪；饥饿不掉血；无条件回血' },
+              { label: 'easy', description: '简单：刷怪概率 ×0.5；怪物伤害减半（最低 1）' },
+              { label: 'normal', description: '普通：默认概率与伤害（推荐）' },
+              { label: 'hard', description: '困难：刷怪概率 ×1.5；怪物伤害 ×2' },
+              { label: 'hardcore', description: '极限：同困难 + 死亡即删档（会话终结，遗言收场）' },
+            ],
+          },
+        ],
+      })
+      const selected = answer.answers?.[0]?.selected?.[0]
+      if (selected !== undefined && (game.DIFFICULTIES as readonly string[]).includes(selected)) {
+        world.difficulty = selected as game.Difficulty
+        await persistWorld(sessionId, world)
+        const note = selected === 'hardcore' ? '死亡即删档——小心！' : '死亡为软回退'
+        notify(sessionId, `🎚️ 本会话难度：${labels[selected]}（${note}）——随时可用 survival_difficulty 修改。`, true)
+      } else {
+        ctx.logger?.info?.(`dsh-survival: 开局难度询问未获有效选择（会话 ${sessionId}），沿用全局难度`)
+      }
+    } catch (error) {
+      // 无 UI provider / 用户未作答 / agent 校验失败：沿用全局难度，并如实播报
+      ctx.logger?.warn?.(`dsh-survival: 开局难度询问失败（会话 ${sessionId}）: ${String(error)}`)
+      try {
+        notify(sessionId, `⚠️ 开局难度询问失败（${String(error)}）——本会话沿用全局难度，可用 survival_difficulty 手动设置。`, true)
+      } catch {
+        /* 播报失败不影响 */
+      }
+    }
+  }
+
+  /**
+   * 首次接触兜底：无论 agent/session-start 是否到达，第一次工具调用时
+   * 都确保（1）出生点快照存在（否则死亡时文件无法回退）、（2）难度询问已发起。
+   * 每个会话只执行一次。
+   */
+  const firstContacts = new Set<string>()
+  const ensureFirstContact = (sessionId: string, world: game.World): void => {
+    if (firstContacts.has(sessionId)) return
+    const meta = metaOf(sessionId)
+    if (!meta.topLevel) return
+    firstContacts.add(sessionId)
+    ctx.logger?.info?.(`dsh-survival: 首次接触会话 ${sessionId}（cwd=${meta.cwd ?? '无'}，难度=${world.difficulty ?? '未设置（将询问）'}）`)
+    // agent 必须是 registry 的 live 实例（web userQuestions provider 要求 agent-owned session）
+    const agent = agents?.get(sessionId)
+    if (world.difficulty === undefined) void askDifficulty(sessionId, world, agent)
+    if (meta.cwd === undefined || meta.cwd.length === 0) return
+    void chain(sessionId, async () => {
+      const backupDir = backupDirOf(sessionId)
+      // 已有快照（出生点或重生点写过 manifest）则跳过
+      let hasManifest = false
+      try {
+        await access(join(backupDir, 'manifest.json'))
+        hasManifest = true
+      } catch {
+        hasManifest = false
+      }
+      if (hasManifest) return
+      const session = agents?.get(sessionId)?.session
+      const result = await snapshotWorkspace(meta.cwd as string, backupDir, excludes())
+      if (result.ok) {
+        // 快照会清空备份目录重建：conversation.md / world.json / respawn.json 必须随后写入
+        await saveConversation(backupDir, conversationMarkdown(session))
+        await saveWorld(backupDir, world)
+        await saveRespawnState(backupDir, game.respawnSnapshotOf(world))
+        notify(sessionId, `📁 出生点已建立：工作区已备份（${result.files} 个文件）+ 对话摘要 + 世界状态。死亡时文件与状态将回退到此；睡过觉后重生点会更新为当前状态。`, true)
+      } else {
+        ctx.logger?.warn?.(`dsh-survival: 出生点快照失败 (${result.error ?? '未知'}) — 死亡时将无法回退文件`)
+      }
+    })
+  }
+
+  // ── 会话开始：建立世界（含重启恢复）+ 首次接触兜底（快照 + 难度询问）──
   ctx.on('agent/session-start', (payload: any) => {
     try {
       const agent = payload?.agent as AgentLike | undefined
       const id = remember(agent)
-      if (id.length === 0) return
-      const world = worldFor(id)
-      const meta = metaOf(id)
-      if (!meta.topLevel || meta.cwd === undefined || meta.cwd.length === 0) return
-      void chain(id, async () => {
-        const backupDir = backupDirOf(id)
-        const result = await snapshotWorkspace(meta.cwd as string, backupDir, excludes())
-        if (result.ok) {
-          // 快照会清空备份目录重建：conversation.md 与 world.json 必须随后写入
-          await saveConversation(backupDir, conversationMarkdown(agent?.session))
-          await saveWorld(backupDir, world)
-          notify(id, `📁 出生点已建立：工作区已备份（${result.files} 个文件）+ 对话摘要 + 世界状态。死亡时文件将回退到此状态；睡过觉后重生点会更新为当前状态。`, true)
-        } else {
-          ctx.logger?.warn?.(`dsh-survival: 出生点快照失败 (${result.error ?? '未知'}) — 死亡时将无法回退文件`)
-        }
-      })
-    } catch {
-      /* 首次接触时惰性建世界兜底 */
+      if (id.length === 0) {
+        ctx.logger?.info?.('dsh-survival: agent/session-start 未解析到会话 id')
+        return
+      }
+      ensureFirstContact(id, worldFor(id))
+    } catch (error) {
+      ctx.logger?.warn?.(`dsh-survival: agent/session-start 处理异常: ${String(error)}`)
     }
   })
 
@@ -379,7 +524,9 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
     const sessionId = remember({ session })
     if (sessionId.length === 0) return
     const world = worlds.get(sessionId) ?? worldFor(sessionId)
-    const outcome = game.onTurn(world, cfg())
+    // 首次接触：用户第一条消息就触发出生点快照与难度询问（session-start 不可靠）
+    ensureFirstContact(sessionId, world)
+    const outcome = game.onTurn(world, cfgFor(world))
     if (outcome.cause !== undefined) void kill(world, outcome.cause)
     for (const notice of outcome.notices ?? []) notify(sessionId, notice.text, notice.urgent)
     // 回合结算落盘：饥饿/回血/昼夜/怪物/羊毛
@@ -391,13 +538,15 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
     const sessionId = remember(exec.agent as AgentLike | undefined)
     if (sessionId.length === 0) return next()
     const world = worldFor(sessionId)
+    // 首次接触兜底：session-start 若未到达，这里补出生点快照与难度询问
+    ensureFirstContact(sessionId, world)
 
     // 免费动作：生存工具、交谈、记账、观察——不耗饥饿也不推进昼夜
     if (game.FREE_TOOLS.has(exec.name) || exec.name.startsWith('survival_')) return next()
 
     // 死亡：除了生存工具外一律拒绝
     if (world.dead) {
-      return { kind: 'deny', reason: game.deathDeny(world, cfg()) }
+      return { kind: 'deny', reason: game.deathDeny(world, cfgFor(world)) }
     }
 
     // 工具门禁：没有对应物品就拒绝（像没有镐子挖不了钻石）
@@ -413,10 +562,14 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
     }
 
     // 生存结算：饥饿 / 怪物（昼夜由对话回合驱动，见 session/event 监听）
-    const outcome = game.settle(world, cfg(), exec.name)
+    const outcome = game.settle(world, cfgFor(world), exec.name)
     if (outcome.cause !== undefined) {
       const respawnNote = await kill(world, outcome.cause)
-      return { kind: 'deny', reason: game.deathDeny(world, cfg()) + (respawnNote.length > 0 ? `\n${respawnNote}` : '') }
+      // hardcore：会话终结，拒绝本次调用；普通难度：软回退后照常放行
+      if (world.dead) {
+        return { kind: 'deny', reason: game.deathDeny(world, cfgFor(world)) + (respawnNote.length > 0 ? `\n${respawnNote}` : '') }
+      }
+      return next()
     }
     if (outcome.deny !== undefined) {
       return { kind: 'deny', reason: outcome.deny }
@@ -442,11 +595,11 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
     } else if (exec.name === 'subagent' || exec.name === 'subagent_fork') {
       tier = 'deeper'
     } else if (exec.name === 'write' || exec.name === 'edit') {
-      tier = Math.random() < cfg().smallLootChance ? 'small' : undefined
+      tier = Math.random() < cfgFor(world).smallLootChance ? 'small' : undefined
     }
     if (tier === undefined) return
 
-    game.mine(world, tier, cfg())
+    game.mine(world, tier, cfgFor(world))
     // 挖矿落盘：材料与经验是硬通货，绝不随进程蒸发
     void persistWorld(sessionId, world)
   })
@@ -460,28 +613,35 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
 
   // ── 服务 ──────────────────────────────────────────────────────────────────
   ctx.provide('survivalEngine', {
-    status: (sessionId: string) => game.formatStatus(worldFor(sessionId), cfg()),
-    hud: (sessionId: string) => game.formatHud(worldFor(sessionId), cfg()),
+    status: (sessionId: string) => {
+      const world = worldFor(sessionId)
+      return game.formatStatus(world, cfgFor(world))
+    },
+    hud: (sessionId: string) => {
+      const world = worldFor(sessionId)
+      return game.formatHud(world, cfgFor(world))
+    },
     eat: (sessionId: string, food: string) => {
       const world = worldFor(sessionId)
-      const outcome = game.eat(world, food, cfg())
+      const outcome = game.eat(world, food, cfgFor(world))
       if (outcome.ok) void persistWorld(sessionId, world)
       return outcome
     },
     craft: (sessionId: string, recipe: string) => {
       const world = worldFor(sessionId)
-      const outcome = game.craft(world, recipe, cfg())
+      const outcome = game.craft(world, recipe, cfgFor(world))
       if (outcome.ok) void persistWorld(sessionId, world)
       return outcome
     },
     sleep: async (sessionId: string) => {
       const world = worldFor(sessionId)
+      const effective = cfgFor(world)
       // 夜晚 + 有床 = 睡觉（跳过夜晚 + 成就）；白天 + 有床 = 休息（只更新重生点备份）
-      const outcome = game.isNight(world, cfg())
-        ? game.sleep(world, cfg())
+      const outcome = game.isNight(world, effective)
+        ? game.sleep(world, effective)
         : (world.items.bed ?? 0) > 0
-          ? game.rest(world, cfg())
-          : game.sleep(world, cfg()) // 无床：复用"你没有床"的错误
+          ? game.rest(world, effective)
+          : game.sleep(world, effective) // 无床：复用"你没有床"的错误
       // 设置重生点：备份工作区文件 + 对话摘要 + 世界状态（await 完成再返回，保证立即可回退）
       if (outcome.ok) {
         const meta = metaOf(sessionId)
@@ -493,6 +653,23 @@ export async function apply(ctx: Context, config: SurvivalEngineConfig) {
       }
       return outcome
     },
-    snapshot: (sessionId: string) => game.snapshot(worldFor(sessionId), cfg()),
+    snapshot: (sessionId: string) => {
+      const world = worldFor(sessionId)
+      return game.snapshot(world, cfgFor(world))
+    },
+    difficulty: (sessionId: string, value?: string) => {
+      const world = worldFor(sessionId)
+      if (value === undefined || value === null || value === '') {
+        const current = cfgFor(world).difficulty
+        return `当前难度：${current}（${world.difficulty !== undefined && world.difficulty !== current ? '本会话覆盖' : world.difficulty !== undefined ? '本会话设置' : '全局 settings'}）。可用 survival_difficulty 修改本会话难度。`
+      }
+      if (!(game.DIFFICULTIES as readonly string[]).includes(value)) {
+        return `无效难度「${value}」——可选：${(game.DIFFICULTIES as readonly string[]).join(' / ')}。`
+      }
+      world.difficulty = value as game.Difficulty
+      void persistWorld(sessionId, world)
+      const note = value === 'hardcore' ? '（死亡即删档：本会话死亡将直接终结！）' : '（死亡为软回退：文件与状态回退到重生点，会话继续）'
+      return `✅ 本会话难度已改为 ${value}${note}（仅本会话生效，其他会话与全局 settings 不受影响）。`
+    },
   } satisfies SurvivalEngineService)
 }

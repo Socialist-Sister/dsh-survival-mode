@@ -24,6 +24,9 @@ export const MAX_HUNGER = 20
 
 export type Difficulty = 'peaceful' | 'easy' | 'normal' | 'hard' | 'hardcore'
 
+/** 全部难度档（survival_difficulty 工具的参数枚举）。 */
+export const DIFFICULTIES: readonly Difficulty[] = ['peaceful', 'easy', 'normal', 'hard', 'hardcore']
+
 export interface SurvivalConfig {
   difficulty: Difficulty
   /** 一天包含的对话回合数（用户消息计数），默认 8，白天与夜晚各半。 */
@@ -271,6 +274,8 @@ export interface World {
   achievements: string[]
   dead: boolean
   death?: DeathInfo
+  /** 会话级难度覆盖（随 world.json 持久化）；缺省时用 settings 全局难度。 */
+  difficulty?: Difficulty
   log: string[]
   /** 播报状态位：只在跃迁时提醒一次，恢复后重新武装。 */
   warnedHunger: boolean
@@ -718,7 +723,48 @@ export function deathDeny(world: World, cfg: SurvivalConfig): string {
   const base = `☠️ 你死了——${world.death?.message ?? '你死了！'}。背包与半数经验已掉落（掉落：${dropped}；经验 -${world.death?.droppedXp ?? 0}）。本会话已死亡：请在回复中写下你的遗言，然后停止工作。`
   // 文件回退结果由引擎在 deny reason 中追加（respawnNote）；这里只说明存档规则。
   void cfg
-  return `${base}（每个会话都是独立存档：新会话从第 1 天、0 经验、空背包重新开始。）`
+  return `${base}（极限模式：死亡即删档——每个新会话都是全新世界，从第 1 天、0 经验、空背包重新开始。）`
+}
+
+/**
+ * 重生点状态快照：软回退（普通难度死亡）恢复用的世界状态子集。
+ * 只包含"重生点时刻"应该恢复的字段；成就与死亡统计不参与回退。
+ */
+export type RespawnSnapshot = Pick<
+  World,
+  'hp' | 'hunger' | 'day' | 'turnsToday' | 'xp' | 'materials' | 'items' | 'respawnBed'
+>
+
+/**
+ * 提取重生点状态快照（出生点/睡觉/休息时保存用，字段与 revive 一致）。
+ */
+export function respawnSnapshotOf(world: World): RespawnSnapshot {
+  return {
+    hp: world.hp,
+    hunger: world.hunger,
+    day: world.day,
+    turnsToday: world.turnsToday,
+    xp: world.xp,
+    materials: { ...world.materials },
+    items: { ...world.items },
+    respawnBed: world.respawnBed,
+  }
+}
+
+/**
+ * 软回退：把世界状态恢复到重生点时刻（生命/饱食/时间/经验/背包）。
+ * 成就保留（原版：成就属于账号，不因死亡丢失）；死亡统计保留。
+ */
+export function revive(world: World, snapshot: RespawnSnapshot): void {
+  world.hp = snapshot.hp
+  world.hunger = snapshot.hunger
+  world.day = snapshot.day
+  world.turnsToday = snapshot.turnsToday
+  world.xp = snapshot.xp
+  world.materials = { ...(snapshot.materials ?? {}) }
+  world.items = { ...(snapshot.items ?? {}) }
+  world.respawnBed = snapshot.respawnBed ?? world.respawnBed
+  pushLog(world, '💫 你已在重生点复活——生命/饱食/时间/经验/背包回退到重生点时刻（重生点之后的进展丢失）。')
 }
 
 // ── 生存动作：吃 / 合成 / 睡觉 ─────────────────────────────────────────────

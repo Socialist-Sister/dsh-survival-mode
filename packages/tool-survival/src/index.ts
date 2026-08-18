@@ -123,6 +123,31 @@ export function apply(ctx: any) {
     }),
   )
 
+  ctx.tools.register(
+    defineTool({
+      name: 'survival_difficulty',
+      description: '查看或修改本会话的难度（仅本会话生效，不影响其他会话与全局 settings）：peaceful 和平 / easy 简单 / normal 普通 / hard 困难 / hardcore 极限（死亡即删档，会话终结）。不传参数 = 查看当前难度。',
+      parameters: {
+        difficulty: {
+          type: 'string',
+          description: 'peaceful | easy | normal | hard | hardcore（省略 = 只查看当前难度）',
+        },
+      },
+      output: {
+        schema: { type: 'string' },
+        render: (_args: any, value: any) => [{ type: 'text', text: String(value) }],
+      },
+      timeoutMs: 30000,
+      isConcurrencySafe: () => true,
+      async execute(args: { difficulty?: string }, exec: any) {
+        const id = sessionIdOf(exec)
+        if (id.length === 0) return '生存模式工具需要在一个会话中调用。'
+        return engine.difficulty(id, args.difficulty)
+      },
+      presentCall: (args: any) => ({ card: 'generic', title: args.difficulty ? `🎚️ 难度 → ${args.difficulty}` : '🎚️ 当前难度', kind: 'other', rawInput: {} }),
+    }),
+  )
+
   // ── HUD：系统提示区实时状态（每次装配渲染）────────────────────────────────
   // order 取最大档（远超工具目录 100–199）：HUD 是每回合变化的动态文本，
   // 必须排在系统提示词最末尾——前缀缓存从第一个不同字节开始失效，

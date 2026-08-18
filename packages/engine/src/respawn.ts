@@ -25,6 +25,8 @@ import { dirname, join, relative, resolve, sep } from 'node:path'
 export const CONVERSATION_FILE = 'conversation.md'
 /** 快照目录里的世界状态文件名（同一会话重启后恢复进度用）。 */
 export const WORLD_FILE = 'world.json'
+/** 快照目录里的重生点状态文件名（普通难度死亡软回退用；只在出生/睡觉/休息时更新）。 */
+export const RESPAWN_STATE_FILE = 'respawn.json'
 
 /** 默认排除的目录名（任意深度按 basename 匹配）：全部是可再生生成物。 */
 export const DEFAULT_EXCLUDES: string[] = [
@@ -201,6 +203,32 @@ export async function saveWorld<T>(backupDir: string, data: T): Promise<boolean>
 export function loadWorldSync<T>(backupDir: string): T | undefined {
   try {
     const raw = readFileSync(join(backupDir, WORLD_FILE), 'utf8')
+    const parsed = JSON.parse(raw) as T
+    return parsed ?? undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * 把重生点状态写入快照目录（respawn.json）：普通难度死亡软回退的恢复源。
+ * 只在出生点/睡觉/休息时更新（此时就是"重生点时刻"），日常结算不碰它。
+ * 必须在 snapshotWorkspace 之后调用。
+ */
+export async function saveRespawnState<T>(backupDir: string, data: T): Promise<boolean> {
+  try {
+    await mkdir(backupDir, { recursive: true })
+    await writeFile(join(backupDir, RESPAWN_STATE_FILE), JSON.stringify(data), 'utf8')
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** 同步读取重生点状态；缺失/损坏返回 undefined（此时无法软回退）。 */
+export function loadRespawnStateSync<T>(backupDir: string): T | undefined {
+  try {
+    const raw = readFileSync(join(backupDir, RESPAWN_STATE_FILE), 'utf8')
     const parsed = JSON.parse(raw) as T
     return parsed ?? undefined
   } catch {

@@ -1,6 +1,6 @@
 {
   "name": "@dsh-survival/tool-survival",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Survival-mode tool package: survival_status / survival_craft / survival_eat / survival_sleep plus the HUD prompt section",
   "license": "MIT",
   "type": "module",

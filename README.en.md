@@ -22,7 +22,7 @@ Minecraft survival rules × real coding work — an entertainment-focused agent 
 
 Every rule is **hard-settled by the engine** (not prompt theater), every game concept maps to vanilla Minecraft survival, and every plugin mechanism follows the official preset spec (same architecture as the dsh-collaboration suite).
 
-**Suite version 0.1.3**: engine 0.16.0 · tool-survival 0.6.2 · hud 0.1.3 · [Installation guide](docs/installation.md) · [GitHub Releases](https://github.com/Socialist-Sister/dsh-survival-mode/releases)
+**Suite version 0.2.0**: engine 0.19.0 · tool-survival 0.6.3 · hud 0.1.3 · [Installation guide](docs/installation.md) · [GitHub Releases](https://github.com/Socialist-Sister/dsh-survival-mode/releases)
 
 **Highlights**
 
@@ -65,7 +65,7 @@ This file is the complete manual: world rules, survival tools, crafting recipes,
 
 1. Install following [docs/installation.md](docs/installation.md) and **restart DSH**;
 2. Start a new session and pick the 「生存模式」(Survival Mode) preset;
-3. Do real work as usual (coding, researching, writing docs) — the engine hard-settles your survival state in the background;
+3. A **difficulty picker** appears (peaceful/easy/normal/hard/hardcore, this session only); then do real work as usual — the engine hard-settles your survival state in the background;
 4. A status bar appears above the input box: ❤️ HP (10 hearts = 20 HP), 🍗 hunger (10 drumsticks = 20 hunger), ☀️/🌙 day, ⭐ XP;
 5. Use `survival_status` for the full state and recipe book; finishing tasks drops materials, `survival_craft` crafts, `survival_eat` eats, `survival_sleep` sleeps (and updates your file respawn point).
 6. Your workspace is backed up automatically at session start (spawn point); sleep to update it — death rolls your files back to the latest snapshot.
@@ -142,6 +142,7 @@ Defense — see [items](#crafting--items): torches suppress spawns (chance ×0.8
 | `survival_craft` | Craft by recipe. Parameter `recipe` takes a recipe id (e.g. `bread`, `iron-pickaxe`, `bed`) — see [the recipe book](#crafting--items). Failures tell you what's missing. |
 | `survival_eat` | Eat to restore hunger. Currently only bread (`food` defaults to `bread`), +8 hunger each. |
 | `survival_sleep` | Use the bed to set/refresh your respawn point: **at night** it sleeps (skips the night, grants Sweet Dreams); **by day** it rests (no night skip). Both back up the workspace files + a conversation digest as your respawn point (death rolls files back to the latest snapshot). |
+| `survival_difficulty` | View/set **this session's** difficulty (peaceful/easy/normal/hard/hardcore) — per-session only, other sessions and global settings are unaffected. |
 
 ---
 
@@ -260,19 +261,26 @@ Calls without the required item are denied with the recipe hint. `tool-ralph` do
 
 ---
 
-## Death, Respawning & File Rollback
+## Death, Respawn & File Rollback
 
-- **Death**: HP hits 0 → vanilla death message ("You were blown up by a Creeper!") → **your whole inventory and materials drop** (the bed stays) → **XP halved** → **file rollback**: the workspace is restored to the latest snapshot (respawn point, or spawn point if you never slept) — files created/modified/deleted after the snapshot are lost.
-- After death the session is over: every tool except survival tools is denied, the status bar shows ☠️ — write your last words, then close the session.
-- **Independent saves**: every session is a separate life and save — day, XP, advancements, and inventory never carry across sessions. A new session starts at day 1, 0 XP, and an empty backpack.
-- **File respawn points**: the engine snapshots your workspace + a conversation digest at session start into `${DSH_HOME}/survival-respawns/<session-id>/` (spawn point); `survival_sleep` refreshes the backup (new respawn point) both when sleeping at night (skips the night) and resting by day (no skip). Death rolls back to the latest snapshot. Generated artifacts (`node_modules` / `.git` / `dist`, configurable) are excluded from both backup and rollback — reinstall/rebuild for a consistent tree. Subagent deaths never touch files.
-- **Hardcore**: same numbers as hard difficulty (spawn chance ×1.5, damage ×2) and death rolls files back the same way — with per-session saves there is no cross-session save to delete, so "death wipes the save" is gone.
+**Normal difficulties (peaceful/easy/normal/hard): death is a SOFT rollback — the session continues**
+
+- **Death**: HP hits 0 → vanilla death message ("You were blown up by a Creeper!") → **file rollback**: the workspace is restored to the latest snapshot (respawn point, or spawn point if you never slept) — files created/modified/deleted after the snapshot are lost.
+- **State rollback**: HP, hunger, time (day & phase), XP, inventory items and materials are **restored to the respawn-point moment** (the `respawn.json` saved at your last sleep/rest) — everything gained after the respawn point is lost (listed in the notice); **advancements are kept** (vanilla: achievements belong to the account, not lost on death).
+- **The session goes on**: death is not the end — after the rollback you can keep working; the price of death is the files, XP and inventory progress made after your respawn point. Sleep often to refresh it.
+
+**Hardcore: death wipes the save — the session ends**
+
+- HP hits 0 → vanilla death message → your whole inventory and half your XP drop → file rollback → the session is over: every tool except survival tools is denied, the status bar shows ☠️ — write your last words, then close the session.
+- A new session is a **brand-new world**: day 1, 0 XP, empty backpack.
+
+- **File respawn points**: the engine snapshots your workspace + a conversation digest at session start into `${DSH_HOME}/survival-respawns/<session-id>/` (spawn point); `survival_sleep` refreshes the backup (new respawn point) both when sleeping at night (skips the night) and resting by day (no skip). Generated artifacts (`node_modules` / `.git` / `dist`, configurable) are excluded from both backup and rollback — reinstall/rebuild for a consistent tree. Subagent deaths never touch files.
 
 ---
 
 ## Difficulty Tiers
 
-Set via `dsh-survival.difficulty` in `settings.yaml`:
+A **new session asks you to pick its difficulty** right at start (and you can change it any time with the `survival_difficulty` tool — per-session only, persisted in `world.json`), so you can run one normal and one hardcore session side by side. The **global default** lives in `dsh-survival.difficulty` in `settings.yaml`:
 
 | Difficulty | Effect |
 |---|---|
@@ -280,7 +288,7 @@ Set via `dsh-survival.difficulty` in `settings.yaml`:
 | `easy` | Spawn chance ×0.5; mob damage halved (minimum 1) |
 | `normal` | Default rates and damage |
 | `hard` | Spawn chance ×1.5; mob damage ×2 |
-| `hardcore` | Same as hard (with per-session saves there is no cross-session save to wipe — death rolls files back the same way) |
+| `hardcore` | Same as hard + **death wipes the save** (session ends, write your last words; a new session is a brand-new world) |
 
 > Note: like vanilla, **difficulty does not affect tool gates** — even in peaceful you still need an iron pickaxe for `subagent`.
 
@@ -353,8 +361,8 @@ Every session is an **independent save**: world state is persisted per session (
 | Data | Lifetime |
 |---|---|
 | World day, XP, deaths, advancements, respawn point (bed), inventory, HP & hunger | **Persisted per session** (`world.json`, same dir as the file respawn point): written after every settlement/mining/crafting/eating/sleeping; resuming the same session after a restart restores it fully; a new session starts at day 1, 0 XP, empty backpack |
-| File respawn point (workspace snapshot + conversation digest + world state) | Snapshotted at session start (spawn point), refreshed on every sleep or day rest (respawn point); stored in `${DSH_HOME}/survival-respawns/<session-id>/` (includes `conversation.md` and `world.json`), removed when the session ends |
-| Death rollback | On death the workspace is restored to the latest snapshot: files created after it are deleted, modified files reverted, deleted files restored; excluded dirs (node_modules etc.) are untouched |
+| File respawn point (workspace snapshot + conversation digest + world state + respawn state) | Snapshotted at session start (spawn point), refreshed on every sleep or day rest (respawn point); stored in `${DSH_HOME}/survival-respawns/<session-id>/` (includes `conversation.md`, `world.json`, `respawn.json`), removed when the session ends |
+| Death rollback | Normal difficulties: files roll back to the latest snapshot + state rolls back to the respawn-point moment (`respawn.json`: HP/hunger/time/XP/inventory), advancements kept, session continues; hardcore: file rollback + drops + session ends |
 | Death info (cause and drops) | Persisted in `world.json` — a dead session stays dead after a restart (no resurrection); start a new session instead |
 
 ---

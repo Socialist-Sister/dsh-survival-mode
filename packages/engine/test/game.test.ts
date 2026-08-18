@@ -12,7 +12,7 @@ import assert from 'node:assert/strict'
 import {
   MAX_HP, MAX_HUNGER, DEFAULT_CONFIG,
   createWorld, isNight, nightLength,
-  settle, onTurn, rollMob, mine, craft, eat, sleep, rest, die, deathDeny,
+  settle, onTurn, rollMob, mine, craft, eat, sleep, rest, die, deathDeny, revive, respawnSnapshotOf,
   RECIPES, GATES, HEAVY_TOOLS, FREE_TOOLS, MOBS, ACHIEVEMENTS,
   MATERIAL_LABELS, ITEM_LABELS, TOOL_DURABILITY,
 } from '../src/game.ts'
@@ -402,18 +402,46 @@ test('die：掉落全部背包与材料，经验减半，床保留', () => {
   assert.ok(death.dropped.length >= 3, '掉落清单含多个条目')
 })
 
-test('deathDeny：独立存档提示；hardcore 与普通一致（不再删档）', () => {
+test('deathDeny：极限模式死亡即删档（会话终结，新会话全新世界）', () => {
   const { cfg, world } = freshWorld()
   die(world, '被僵尸杀死了')
   const deny = deathDeny(world, cfg)
-  assert.match(deny, /独立存档/)
-  assert.match(deny, /新会话从第 1 天/)
-  assert.doesNotMatch(deny, /删档/)
-  const w2 = freshWorld({ difficulty: 'hardcore' }).world
-  die(w2, '被僵尸杀死了')
-  const denyHard = deathDeny(w2, { ...cfg, difficulty: 'hardcore' })
-  assert.match(denyHard, /独立存档/)
-  assert.doesNotMatch(denyHard, /删档/)
+  assert.match(deny, /极限模式：死亡即删档/)
+  assert.match(deny, /背包与半数经验已掉落/)
+  assert.match(deny, /新会话/)
+})
+
+test('revive：软回退恢复生命/饱食/时间/经验/背包，成就与死亡统计保留', () => {
+  const { cfg, world } = freshWorld()
+  void cfg
+  world.hp = 5
+  world.hunger = 3
+  world.day = 4
+  world.turnsToday = 6
+  world.xp = 30
+  world.items.bread = 3
+  world.materials.iron = 7
+  world.achievements.push('diamonds')
+  world.deaths = 2
+  const snap = respawnSnapshotOf(world)
+  // 死亡后状态变化（模拟：血尽、饥饿清零、时间推进、经验/背包消耗）
+  world.hp = 0
+  world.hunger = 0
+  world.day = 5
+  world.turnsToday = 2
+  world.xp = 10
+  world.items.bread = 0
+  world.materials.iron = 1
+  revive(world, snap)
+  assert.equal(world.hp, 5)
+  assert.equal(world.hunger, 3)
+  assert.equal(world.day, 4, '时间回退到重生点')
+  assert.equal(world.turnsToday, 6)
+  assert.equal(world.xp, 30, '经验回退')
+  assert.equal(world.items.bread, 3, '背包物品回退')
+  assert.equal(world.materials.iron, 7, '材料回退')
+  assert.ok(world.achievements.includes('diamonds'), '成就保留（原版：成就属于账号）')
+  assert.equal(world.deaths, 2, '死亡统计保留')
 })
 
 test('成就表：4 项原版成就', () => {

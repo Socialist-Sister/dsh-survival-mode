@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { snapshotWorkspace, restoreWorkspace, removeSnapshot, saveConversation, saveWorld, loadWorldSync, DEFAULT_EXCLUDES } from '../src/respawn.ts'
+import { snapshotWorkspace, restoreWorkspace, removeSnapshot, saveConversation, saveWorld, loadWorldSync, saveRespawnState, loadRespawnStateSync, DEFAULT_EXCLUDES } from '../src/respawn.ts'
 
 /** 建一个临时"工作区 + 备份目录"。 */
 async function makeDirs() {
@@ -184,6 +184,27 @@ test('saveWorld/loadWorldSync：世界状态往返；缺失与损坏返回 undef
     assert.equal(loaded.day, 3)
     assert.deepEqual(loaded.items, { bread: 2 })
     assert.deepEqual(loaded.materials, { iron: 5 })
+  } finally {
+    await rm(join(backup, '..'), { recursive: true, force: true })
+  }
+})
+
+test('saveRespawnState/loadRespawnStateSync：重生点状态往返', async () => {
+  const { backup } = await makeDirs()
+  try {
+    await mkdir(backup, { recursive: true })
+    assert.equal(loadRespawnStateSync(backup), undefined, '无 respawn.json 时 undefined')
+
+    const state = { hp: 20, hunger: 20, day: 2, turnsToday: 0, xp: 12, materials: { wheat: 3 }, items: { bread: 1 }, respawnBed: true }
+    assert.equal(await saveRespawnState(backup, state), true)
+    const loaded = loadRespawnStateSync<typeof state>(backup)
+    assert.ok(loaded !== undefined)
+    assert.equal(loaded.hp, 20)
+    assert.equal(loaded.day, 2)
+    assert.equal(loaded.turnsToday, 0)
+    assert.deepEqual(loaded.items, { bread: 1 })
+    assert.deepEqual(loaded.materials, { wheat: 3 })
+    assert.equal(loaded.respawnBed, true)
   } finally {
     await rm(join(backup, '..'), { recursive: true, force: true })
   }
