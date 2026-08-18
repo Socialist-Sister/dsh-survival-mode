@@ -46,7 +46,7 @@ This file is the complete manual: world rules, survival tools, crafting recipes,
 5. [Mining & Drops](#mining--drops)
 6. [Crafting & Items](#crafting--items)
 7. [Tool Gates](#tool-gates)
-8. [Death & Respawning](#death--respawning)
+8. [Death, Respawning & File Rollback](#death-respawning--file-rollback)
 9. [Difficulty Tiers](#difficulty-tiers)
 10. [Advancements](#advancements)
 11. [Settings (settings.yaml)](#settings-settingsyaml)
