@@ -1,0 +1,10 @@
+# dsh-survival-mode bundle patch
+#
+# 这是套件的"宿主半"声明：把浏览器状态栏桥挂进宿主 composition。
+# 注意：完整套件 = 三个 npm 包（@dsh-survival/engine + tool-survival 在
+# 「生存模式」预设的 isolate realm 组内，@dsh-survival/hud 是唯一的宿主行）
+# + survival 预设目录，请按 docs/installation.md 安装。
+# 直接 git install 本仓库只会挂载 hud 宿主行，引擎与工具需另按安装指南配置。
+- insert:
+    - id: survival-hud
+      name: '@dsh-survival/hud'
