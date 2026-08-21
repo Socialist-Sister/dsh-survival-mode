@@ -22,7 +22,7 @@ Minecraft survival rules × real coding work — an entertainment-focused agent 
 
 Every rule is **hard-settled by the engine** (not prompt theater), every game concept maps to vanilla Minecraft survival, and every plugin mechanism follows the official preset spec (same architecture as the dsh-collaboration suite).
 
-**Suite version 0.2.0**: engine 0.19.0 · tool-survival 0.6.3 · hud 0.1.3 · [Installation guide](docs/installation.md) · [GitHub Releases](https://github.com/Socialist-Sister/dsh-survival-mode/releases)
+**Suite version 0.2.1**: engine 0.19.1 · tool-survival 0.6.3 · hud 0.1.3 · [Installation guide](docs/installation.md) · [GitHub Releases](https://github.com/Socialist-Sister/dsh-survival-mode/releases)
 
 **Highlights**
 
@@ -119,7 +119,7 @@ Notices are plugin-sourced messages and **do not advance game time** (only real 
 
 - **Days advance by dialogue turns**: each user message counts as one turn (pure chat still passes time); one day lasts `dayLengthTurns` turns (default 8), the last third is night.
 - Tool calls don't advance time, but they do settle hunger and mob encounters.
-- By day you occasionally meet sheep (wool, for beds); at night mobs spawn.
+- By day each action has a 10% chance to meet sheep (wool ×1–2, for beds); at night mobs spawn.
 
 ### Hostile Mobs
 
@@ -152,7 +152,7 @@ Defense — see [items](#crafting--items): torches suppress spawns (chance ×0.8
 
 | Trigger | Drops | XP |
 |---|---|---|
-| File write succeeds (`write`/`edit`, 70% chance) | cobblestone ×1 + 2 random from wood/wheat/coal (wheat weighted highest); 10% iron ore ×1 | +2 |
+| File write succeeds (`write`/`edit`, 70% chance) | cobblestone ×1 + 2 random from wood/wheat/coal (wheat weighted highest); 25% iron ore ×1 | +2 |
 | Plan exit (`exit_plan_mode`, **once per day**) | coal ×2 + iron ore ×1; 30% copper ore ×1 | +10 |
 | Goal complete (`update_goal` action=complete) | iron ore ×2 + redstone ×2; 25% diamond ×1; 25% copper ore ×1; 15% amethyst ×1 | +15 |
 | Subagent success (`subagent`/`subagent_fork` settles) | iron ore ×1 + redstone ×1; 15% diamond ×1; 15% amethyst ×1 | +12 |
@@ -179,7 +179,7 @@ Iron/copper ores must be smelted in a furnace before crafting; redstone, diamond
 | Material | Source |
 |---|---|
 | Wood / cobblestone / coal / wheat | Small tasks (file writes) |
-| Wool | Meeting sheep by day (1–2 each) |
+| Wool | 10% chance to meet sheep per day action (1–2 each) |
 | Iron ore / copper ore | Small/medium tasks; needs smelting |
 | Redstone | Big tasks (goals / subagents) |
 | Diamond / amethyst | Rare deep-mining drops |

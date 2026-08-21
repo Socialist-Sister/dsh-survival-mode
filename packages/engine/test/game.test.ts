@@ -212,7 +212,7 @@ test('settle：夜晚刷怪伤害/骷髅打断', () => {
 
 // ── 挖矿 ──────────────────────────────────────────────────────────────────
 
-test('mine：small 掉圆石+2 材料+经验，iron-ore 10% 概率', () => {
+test('mine：small 掉圆石+2 材料+经验，iron-ore 25% 概率', () => {
   const { cfg, world } = freshWorld()
   const lines = mine(world, 'small', cfg)
   assert.ok(world.materials.cobble >= 1, '必掉圆石')

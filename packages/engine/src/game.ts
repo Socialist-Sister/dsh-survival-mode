@@ -627,9 +627,9 @@ function rollMob(world: World, cfg: SurvivalConfig): { reason?: string; cause?: 
   return undefined
 }
 
-/** 白天偶尔遇到羊（被动生物，掉羊毛）。 */
+/** 白天偶尔遇到羊（被动生物，掉羊毛）：10% 概率（v0.2.1 从 5% 上调——原设计偏稀，短会话攒不齐做床的 3 个羊毛）。 */
 function rollSheep(world: World): void {
-  if (Math.random() >= 0.05) return
+  if (Math.random() >= 0.1) return
   const wool = 1 + Math.floor(Math.random() * 2)
   addMaterial(world, 'wool', wool)
   pushLog(world, `🐑 你遇到了一群羊，剪到了羊毛×${wool}（羊毛×3 + 木板×3 = 床）。`)
@@ -656,7 +656,8 @@ export function mine(world: World, tier: LootTier, cfg: SurvivalConfig): string[
       const pool: MaterialId[] = ['wood', 'wheat', 'wheat', 'coal']
       add(pool[Math.floor(Math.random() * pool.length)], 1)
       add(pool[Math.floor(Math.random() * pool.length)], 1)
-      if (Math.random() < 0.1) add('iron-ore', 1)
+      // 铁矿石 25%（v0.2.1 从 10% 上调——铁镐/铁剑/盾牌的门票，原概率让短会话几乎见不到）
+      if (Math.random() < 0.25) add('iron-ore', 1)
       gainXp(2)
       break
     }
